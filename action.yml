@@ -1,0 +1,30 @@
+name: "Upload to Zoho WorkDrive"
+description: "Uploads a file to Zoho WorkDrive and returns a public direct-download URL."
+author: "Alexandre DO-O ALMEIDA (@aleqsd)"
+branding:
+  icon: "upload-cloud"
+  color: "blue"
+
+inputs:
+  file_path:
+    description: "Local file to upload."
+    required: true
+  remote_name:
+    description: "Optional remote name for the uploaded file."
+    required: false
+  stdout_mode:
+    description: "Output format: full | direct | json (default: full)."
+    required: false
+    default: "full"
+
+outputs:
+  zoho_direct_url:
+    description: "Public direct-download URL for the uploaded file."
+
+runs:
+  using: "docker"
+  image: "Dockerfile"
+  args:
+    - ${{ inputs.file_path }}
+    - --stdout-mode=${{ inputs.stdout_mode }}
+    - --remote-name=${{ inputs.remote_name }}

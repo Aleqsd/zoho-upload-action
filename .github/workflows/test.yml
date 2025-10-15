@@ -1,0 +1,25 @@
+name: Test Zoho Upload Action
+
+on:
+  workflow_dispatch:
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Run Zoho upload
+        id: upload
+        uses: ./
+        with:
+          file_path: "sample_upload.txt"
+        env:
+          ZOHO_CLIENT_ID: ${{ secrets.ZOHO_CLIENT_ID }}
+          ZOHO_CLIENT_SECRET: ${{ secrets.ZOHO_CLIENT_SECRET }}
+          ZOHO_REFRESH_TOKEN: ${{ secrets.ZOHO_REFRESH_TOKEN }}
+          ZOHO_FOLDER_ID: ${{ secrets.ZOHO_FOLDER_ID }}
+
+      - name: Print result
+        run: echo "Direct URL = ${{ steps.upload.outputs.zoho_direct_url }}"

@@ -1,0 +1,2 @@
+This is a sample file bundled with the repository so you can test the Zoho upload action locally.
+Feel free to replace its contents or path when running the action.
