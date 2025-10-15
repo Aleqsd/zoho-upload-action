@@ -221,6 +221,29 @@ class UploadActionTests(unittest.TestCase):
         self.assertEqual(payload.get("preview_url"), internal_link)
         self.assertEqual(payload.get("resource_id"), "resABC")
 
+    def test_resolve_file_path_returns_absolute(self):
+        resolved = self.upload.resolve_file_path(str(self.sample_file))
+        self.assertEqual(resolved, os.path.abspath(self.sample_file))
+
+    def test_resolve_file_path_outside_workspace_guidance(self):
+        os.environ["GITHUB_WORKSPACE"] = "/github/workspace"
+        self.addCleanup(os.environ.pop, "GITHUB_WORKSPACE", None)
+        with self.assertRaises(SystemExit) as ctx:
+            self.upload.resolve_file_path("/tmp/missing.txt")
+        message = str(ctx.exception)
+        self.assertIn("Docker-based GitHub Actions", message)
+        self.assertIn("workspace", message)
+
+    def test_resolve_file_path_missing_inside_workspace(self):
+        workspace = os.path.abspath(self.tmpdir.name)
+        os.environ["GITHUB_WORKSPACE"] = workspace
+        self.addCleanup(os.environ.pop, "GITHUB_WORKSPACE", None)
+        missing = os.path.join(workspace, "not-here.txt")
+        with self.assertRaises(SystemExit) as ctx:
+            self.upload.resolve_file_path(missing)
+        message = str(ctx.exception)
+        self.assertIn("File not found in workspace", message)
+
 
 if __name__ == "__main__":
     unittest.main()

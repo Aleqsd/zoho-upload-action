@@ -33,7 +33,7 @@ Use the generated outputs anywhere later in the job:
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `file_path` | – | Local file to upload (required). |
+| `file_path` | – | Local file to upload (required, must reside inside the workflow workspace). |
 | `remote_name` | – | Override the filename stored in WorkDrive. |
 | `stdout_mode` | `full` | Configure container logging (`full`, `direct`, `json`). |
 | `region` | `us` | Target data centre (`us`, `eu`, `in`, `au`, `jp`, `cn`). |
@@ -52,6 +52,9 @@ Use the generated outputs anywhere later in the job:
 | `zoho_html_snippet` | `<img>` snippet pointing at the direct link (when available). |
 | `zoho_resource_id` | WorkDrive resource identifier for the uploaded file. |
 | `zoho_remote_name` | Final filename stored in WorkDrive after conflict handling. |
+
+> 🗂️ **Workspace access only**  
+> This Docker-based action can only read files that live inside `${{ github.workspace }}`. Copy or generate build artifacts into that directory (or use `actions/download-artifact` earlier in the job) before invoking the upload step. The action now fails fast with guidance when the file is missing or comes from outside the workspace mount.
 
 ---
 
@@ -75,6 +78,8 @@ docker run --rm --env-file .env -v "$PWD":/workspace -w /workspace \
 # Run the automated test suite (requires Python 3)
 make test
 ```
+
+The `docker run` invocation mirrors the GitHub Actions mount by exposing your project as `/workspace`; keep the file you pass to the container inside that directory so the action can read it just like it would under `${{ github.workspace }}`.
 
 ## ❗ Duplicate filenames
 
