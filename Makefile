@@ -9,6 +9,15 @@ endif
 
 pip = $(PYTHON) -m pip
 
+VERSION ?= $(word 2,$(MAKECMDGOALS))
+VERSION := $(strip $(VERSION))
+
+ifneq ($(VERSION),)
+ifneq ($(VERSION),release)
+$(eval $(VERSION):;@:)
+endif
+endif
+
 test:
 	$(PYTHON) -m unittest discover -s tests -v
 
@@ -29,13 +38,17 @@ lint:
 	$(PYTHON) -m compileall upload_zoho.py
 
 release:
-	@echo "🚀 Releasing zoho-upload-action v1.0.1..."
+	@if [ -z "$(VERSION)" ]; then \
+	  echo "Usage: make release v1.0.2"; \
+	  exit 1; \
+	fi
+	@echo "🚀 Releasing zoho-upload-action $(VERSION)..."
 	git add .
-	git commit -m "🔖 Release v1.0.1" || echo "✅ No changes to commit."
+	git commit -m "🔖 Release $(VERSION)" || echo "✅ No changes to commit."
 	git push origin main
 	# Update version tags
 	git tag -fa v1 -m "v1 - latest stable"
-	git tag -fa v1.0.1 -m "v1.0.1 release"
+	git tag -fa $(VERSION) -m "$(VERSION) release"
 	git push origin v1 --force
-	git push origin v1.0.1 --force
-	@echo "✅ GitHub Action release updated: https://github.com/$(shell git config user.name)/$(shell basename `git rev-parse --show-toplevel`)/releases/tag/v1.0.1"
+	git push origin $(VERSION) --force
+	@echo "✅ GitHub Action release updated: https://github.com/$(shell git config user.name)/$(shell basename `git rev-parse --show-toplevel`)/releases/tag/$(VERSION)"
