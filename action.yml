@@ -7,7 +7,7 @@ branding:
 
 inputs:
   file_path:
-    description: "Local file to upload."
+    description: "Local file to upload (must be inside the GitHub workspace)."
     required: true
   remote_name:
     description: "Optional remote name for the uploaded file."

@@ -52,6 +52,39 @@ REFRESH_TOKEN = os.getenv("ZOHO_REFRESH_TOKEN")
 FOLDER_ID = os.getenv("ZOHO_FOLDER_ID")
 
 
+def is_within(path: str, parent: str) -> bool:
+    path_abs = os.path.abspath(path)
+    parent_abs = os.path.abspath(parent)
+    try:
+        return os.path.commonpath([path_abs, parent_abs]) == parent_abs
+    except ValueError:
+        return False
+
+
+def resolve_file_path(raw_path: str) -> str:
+    abs_path = os.path.abspath(raw_path)
+    if os.path.isfile(abs_path):
+        return abs_path
+
+    workspace = os.getenv("GITHUB_WORKSPACE")
+    if workspace:
+        workspace_abs = os.path.abspath(workspace)
+        if not is_within(abs_path, workspace_abs):
+            message = (
+                f"❌ File not found: {raw_path}\n"
+                f"   Docker-based GitHub Actions can only access files inside the workspace ({workspace_abs}). "
+                "Copy or generate the file there before invoking the action."
+            )
+        else:
+            message = (
+                f"❌ File not found in workspace: {abs_path}\n"
+                "   Confirm previous steps produced the file inside the repository before this action runs."
+            )
+        sys.exit(color(message, RED, True))
+
+    sys.exit(color(f"❌ File not found: {raw_path}", RED, True))
+
+
 def color(text: str, ansi: str, enable: bool) -> str:
     return f"{ansi}{text}{RESET}" if enable else text
 
@@ -453,11 +486,12 @@ def main() -> None:
     region, api_base, accounts_base = resolve_endpoints(args.region)
     token = get_access_token(accounts_base)
     log_enabled = args.stdout_mode == "full"
+    target_path = resolve_file_path(args.file_path)
 
     resource_id, permalink, final_remote_name = upload_file(
         api_base=api_base,
         token=token,
-        path=args.file_path,
+        path=target_path,
         remote_name=args.remote_name,
         conflict_mode=args.conflict_mode,
         max_retries=args.max_retries,
