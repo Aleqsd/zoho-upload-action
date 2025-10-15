@@ -16,10 +16,42 @@ inputs:
     description: "Output format: full | direct | json (default: full)."
     required: false
     default: "full"
+  region:
+    description: "Zoho region to target (us | eu | in | au | jp | cn)."
+    required: false
+    default: "us"
+  link_mode:
+    description: "Which URLs to emit: direct | preview | both (default: direct)."
+    required: false
+    default: "direct"
+  share_mode:
+    description: "Share behaviour: public (default) or skip to keep the file private."
+    required: false
+    default: "public"
+  conflict_mode:
+    description: "Duplicate handling: abort | rename | replace (default: abort)."
+    required: false
+    default: "abort"
+  max_retries:
+    description: "Retry count for upload/link API calls."
+    required: false
+    default: "3"
+  retry_delay:
+    description: "Delay between retries in seconds."
+    required: false
+    default: "2"
 
 outputs:
   zoho_direct_url:
     description: "Public direct-download URL for the uploaded file."
+  zoho_preview_url:
+    description: "Public WorkDrive share URL without the direct download parameter."
+  zoho_html_snippet:
+    description: "HTML snippet embedding the direct URL when available."
+  zoho_resource_id:
+    description: "Zoho WorkDrive resource identifier for the uploaded item."
+  zoho_remote_name:
+    description: "Final filename stored in Zoho WorkDrive (after conflict handling)."
 
 runs:
   using: "docker"
@@ -28,3 +60,9 @@ runs:
     - ${{ inputs.file_path }}
     - --stdout-mode=${{ inputs.stdout_mode }}
     - --remote-name=${{ inputs.remote_name }}
+    - --region=${{ inputs.region }}
+    - --link-mode=${{ inputs.link_mode }}
+    - --share-mode=${{ inputs.share_mode }}
+    - --conflict-mode=${{ inputs.conflict_mode }}
+    - --max-retries=${{ inputs.max_retries }}
+    - --retry-delay=${{ inputs.retry_delay }}

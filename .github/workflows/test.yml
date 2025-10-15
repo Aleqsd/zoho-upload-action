@@ -6,6 +6,11 @@ on:
 jobs:
   upload:
     runs-on: ubuntu-latest
+    env:
+      ZOHO_CLIENT_ID: ${{ secrets.ZOHO_CLIENT_ID }}
+      ZOHO_CLIENT_SECRET: ${{ secrets.ZOHO_CLIENT_SECRET }}
+      ZOHO_REFRESH_TOKEN: ${{ secrets.ZOHO_REFRESH_TOKEN }}
+      ZOHO_FOLDER_ID: ${{ secrets.ZOHO_FOLDER_ID }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -15,11 +20,34 @@ jobs:
         uses: ./
         with:
           file_path: "sample_upload.txt"
-        env:
-          ZOHO_CLIENT_ID: ${{ secrets.ZOHO_CLIENT_ID }}
-          ZOHO_CLIENT_SECRET: ${{ secrets.ZOHO_CLIENT_SECRET }}
-          ZOHO_REFRESH_TOKEN: ${{ secrets.ZOHO_REFRESH_TOKEN }}
-          ZOHO_FOLDER_ID: ${{ secrets.ZOHO_FOLDER_ID }}
+          remote_name: sample-${{ github.run_id }}.txt
+          stdout_mode: full
+          link_mode: both
+
+      - name: Run Zoho upload (replace existing)
+        id: upload_replace
+        uses: ./
+        with:
+          file_path: "sample_upload.txt"
+          remote_name: sample-${{ github.run_id }}.txt
+          stdout_mode: direct
+          link_mode: direct
+          conflict_mode: replace
+
+      - name: Run Zoho upload (private)
+        id: upload_private
+        uses: ./
+        with:
+          file_path: "sample_upload.txt"
+          remote_name: private-${{ github.run_id }}.txt
+          stdout_mode: json
+          share_mode: skip
+          link_mode: preview
 
       - name: Print result
-        run: echo "Direct URL = ${{ steps.upload.outputs.zoho_direct_url }}"
+        run: |
+          echo "Direct URL  = ${{ steps.upload.outputs.zoho_direct_url }}"
+          echo "Preview URL = ${{ steps.upload.outputs.zoho_preview_url }}"
+          echo "Resource ID = ${{ steps.upload.outputs.zoho_resource_id }}"
+          echo "Replace Direct URL  = ${{ steps.upload_replace.outputs.zoho_direct_url }}"
+          echo "Private Preview URL = ${{ steps.upload_private.outputs.zoho_preview_url }}"
