@@ -56,9 +56,6 @@ outputs:
 runs:
   using: "docker"
   image: "Dockerfile"
-  hide: true
-  env:
-    PYTHONUNBUFFERED: 1
   args:
     - ${{ inputs.file_path }}
     - --stdout-mode=${{ inputs.stdout_mode }}
