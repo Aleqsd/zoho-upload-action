@@ -44,25 +44,104 @@ inputs:
 outputs:
   zoho_direct_url:
     description: "Public direct-download URL for the uploaded file."
+    value: ${{ steps.run_upload.outputs.zoho_direct_url }}
   zoho_preview_url:
     description: "Public WorkDrive share URL without the direct download parameter."
+    value: ${{ steps.run_upload.outputs.zoho_preview_url }}
   zoho_html_snippet:
     description: "HTML snippet embedding the direct URL when available."
+    value: ${{ steps.run_upload.outputs.zoho_html_snippet }}
   zoho_resource_id:
     description: "Zoho WorkDrive resource identifier for the uploaded item."
+    value: ${{ steps.run_upload.outputs.zoho_resource_id }}
   zoho_remote_name:
     description: "Final filename stored in Zoho WorkDrive (after conflict handling)."
+    value: ${{ steps.run_upload.outputs.zoho_remote_name }}
 
 runs:
-  using: "docker"
-  image: "Dockerfile"
-  args:
-    - ${{ inputs.file_path }}
-    - --stdout-mode=${{ inputs.stdout_mode }}
-    - --remote-name=${{ inputs.remote_name }}
-    - --region=${{ inputs.region }}
-    - --link-mode=${{ inputs.link_mode }}
-    - --share-mode=${{ inputs.share_mode }}
-    - --conflict-mode=${{ inputs.conflict_mode }}
-    - --max-retries=${{ inputs.max_retries }}
-    - --retry-delay=${{ inputs.retry_delay }}
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v python >/dev/null 2>&1; then
+          python_bin="$(command -v python)"
+        elif command -v python3 >/dev/null 2>&1; then
+          python_bin="$(command -v python3)"
+        else
+          echo "::error::Python interpreter not found"
+          exit 1
+        fi
+        echo "PYTHON_BIN=${python_bin}" >> "${GITHUB_ENV}"
+        req_file="${GITHUB_ACTION_PATH}/requirements.txt"
+        if [[ -s "${req_file}" ]]; then
+          "${python_bin}" -m pip install --quiet --disable-pip-version-check --no-cache-dir -r "${req_file}"
+        fi
+
+    - name: Upload to Zoho WorkDrive
+      id: run_upload
+      shell: bash
+      env:
+        INPUT_FILE_PATH: ${{ inputs.file_path }}
+        INPUT_STDOUT_MODE: ${{ inputs.stdout_mode }}
+        INPUT_REMOTE_NAME: ${{ inputs.remote_name }}
+        INPUT_REGION: ${{ inputs.region }}
+        INPUT_LINK_MODE: ${{ inputs.link_mode }}
+        INPUT_SHARE_MODE: ${{ inputs.share_mode }}
+        INPUT_CONFLICT_MODE: ${{ inputs.conflict_mode }}
+        INPUT_MAX_RETRIES: ${{ inputs.max_retries }}
+        INPUT_RETRY_DELAY: ${{ inputs.retry_delay }}
+      run: |
+        set -euo pipefail
+        python_bin="${PYTHON_BIN:-}"
+        if [[ -z "${python_bin}" ]]; then
+          if command -v python >/dev/null 2>&1; then
+            python_bin="$(command -v python)"
+          elif command -v python3 >/dev/null 2>&1; then
+            python_bin="$(command -v python3)"
+          else
+            echo "::error::Python interpreter not found"
+            exit 1
+          fi
+        fi
+        args=("${INPUT_FILE_PATH}")
+
+        if [[ -n "${INPUT_STDOUT_MODE}" ]]; then
+          args+=("--stdout-mode=${INPUT_STDOUT_MODE}")
+        fi
+
+        if [[ -n "${INPUT_REMOTE_NAME}" ]]; then
+          args+=("--remote-name=${INPUT_REMOTE_NAME}")
+        fi
+
+        if [[ -n "${INPUT_REGION}" ]]; then
+          args+=("--region=${INPUT_REGION}")
+        fi
+
+        if [[ -n "${INPUT_LINK_MODE}" ]]; then
+          args+=("--link-mode=${INPUT_LINK_MODE}")
+        fi
+
+        if [[ -n "${INPUT_SHARE_MODE}" ]]; then
+          args+=("--share-mode=${INPUT_SHARE_MODE}")
+        fi
+
+        if [[ -n "${INPUT_CONFLICT_MODE}" ]]; then
+          args+=("--conflict-mode=${INPUT_CONFLICT_MODE}")
+        fi
+
+        if [[ -n "${INPUT_MAX_RETRIES}" ]]; then
+          args+=("--max-retries=${INPUT_MAX_RETRIES}")
+        fi
+
+        if [[ -n "${INPUT_RETRY_DELAY}" ]]; then
+          args+=("--retry-delay=${INPUT_RETRY_DELAY}")
+        fi
+        
+        "${python_bin}" "${GITHUB_ACTION_PATH}/upload_zoho.py" "${args[@]}"

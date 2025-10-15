@@ -35,7 +35,7 @@ Use the generated outputs anywhere later in the job:
 |-------|---------|-------------|
 | `file_path` | – | Local file to upload (required, must reside inside the workflow workspace). |
 | `remote_name` | – | Override the filename stored in WorkDrive. |
-| `stdout_mode` | `full` | Configure container logging (`full`, `direct`, `json`). |
+| `stdout_mode` | `full` | Control script logging (`full`, `direct`, `json`). |
 | `region` | `us` | Target data centre (`us`, `eu`, `in`, `au`, `jp`, `cn`). |
 | `link_mode` | `direct` | Emit `direct`, `preview`, or `both` URLs. |
 | `share_mode` | `public` | `public` applies "Everyone on the internet" permissions; `skip` keeps the file private. |
@@ -54,7 +54,7 @@ Use the generated outputs anywhere later in the job:
 | `zoho_remote_name` | Final filename stored in WorkDrive after conflict handling. |
 
 > 🗂️ **Workspace access only**  
-> This Docker-based action can only read files that live inside `${{ github.workspace }}`. Copy or generate build artifacts into that directory (or use `actions/download-artifact` earlier in the job) before invoking the upload step. The action now fails fast with guidance when the file is missing or comes from outside the workspace mount.
+> The action can only read files that live inside `${{ github.workspace }}`. Copy or generate build artifacts into that directory (or use `actions/download-artifact` earlier in the job) before invoking the upload step. The script fails fast with guidance when the file is missing or comes from outside the workspace.
 
 ---
 
@@ -70,16 +70,21 @@ Use the generated outputs anywhere later in the job:
 ## 🧪 Local test loop
 
 ```bash
-cp .env.example .env  # then fill in real credentials
-docker build -t zoho-upload-action .
-docker run --rm --env-file .env -v "$PWD":/workspace -w /workspace \
-  zoho-upload-action sample_upload.txt --remote-name sample-$(date +%s).txt
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 
-# Run the automated test suite (requires Python 3)
+cp .env.example .env  # then fill in real credentials
+
+# Load credentials and run the uploader locally
+set -a && source .env && set +a
+python upload_zoho.py sample_upload.txt --remote-name sample-$(date +%s).txt --link-mode both
+
+# Run the automated test suite
 make test
 ```
 
-The `docker run` invocation mirrors the GitHub Actions mount by exposing your project as `/workspace`; keep the file you pass to the container inside that directory so the action can read it just like it would under `${{ github.workspace }}`.
+The script honours all CLI flags available in the action, so you can dry-run new combinations locally before updating your workflow.
 
 ## ❗ Duplicate filenames
 
