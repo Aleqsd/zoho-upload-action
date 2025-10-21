@@ -44,7 +44,7 @@ release:
 	fi
 	@echo "🚀 Releasing zoho-upload-action $(VERSION)..."
 	git add .
-	git commit -m "🔖 Release $(VERSION)" || echo "✅ No changes to commit."
+	git commit -m "Release $(VERSION)" || echo "✅ No changes to commit."
 	git push origin main
 	# Update version tags
 	git tag -fa v1 -m "v1 - latest stable"

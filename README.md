@@ -31,7 +31,7 @@ Use the generated outputs anywhere later in the job:
 
 ### 📦 Uploading multiple files
 
-Provide several files in a single step by separating the paths with newlines:
+Provide several files in a single step by separating the paths with newlines or commas:
 
 ```yaml
 - name: Upload multiple assets to Zoho
@@ -40,6 +40,8 @@ Provide several files in a single step by separating the paths with newlines:
     file_path: |
       dist/api.tar.gz
       dist/web-assets.zip
+    # Comma-separated also works on a single line:
+    # file_path: dist/api.tar.gz,dist/web-assets.zip
 ```
 
 The action uploads each file sequentially, sharing them with the same options (`link_mode`, `share_mode`, etc.). The summary
@@ -58,7 +60,7 @@ compatibility, while enumerated keys such as `zoho_direct_url_2` are provided fo
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `file_path` | – | Local file(s) to upload (required, newline-separated to upload multiple files, must reside inside the workflow workspace). |
+| `file_path` | – | Local file(s) to upload (required, newline- or comma-separated to upload multiple files, must reside inside the workflow workspace). |
 | `remote_name` | – | Override the filename stored in WorkDrive (only valid when uploading a single file). |
 | `stdout_mode` | `full` | Control script logging (`full`, `direct`, `json`). |
 | `region` | `us` | Target data centre (`us`, `eu`, `in`, `au`, `jp`, `cn`). |

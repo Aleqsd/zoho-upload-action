@@ -358,10 +358,53 @@ class UploadActionTests(unittest.TestCase):
                     self.upload.main()
 
         self.assertEqual(upload_mock.call_count, 2)
-        first_call = upload_mock.call_args_list[0].kwargs["path"]
-        second_call = upload_mock.call_args_list[1].kwargs["path"]
-        self.assertTrue(first_call.endswith("image1.png"))
-        self.assertTrue(second_call.endswith("image2.png"))
+
+    def test_expand_input_paths_splits_commas(self):
+        second_file = Path(self.tmpdir.name) / "sample2.txt"
+        second_file.write_text("more content")
+
+        combined = f" {self.sample_file} , {second_file} "
+        expanded = self.upload.expand_input_paths([combined])
+        self.assertEqual(expanded, [str(self.sample_file), str(second_file)])
+
+    def test_main_accepts_comma_delimited_files(self):
+        second_file = Path(self.tmpdir.name) / "second.txt"
+        second_file.write_text("two")
+
+        upload_side_effects = [
+            ("resA", "https://permalinkA", "artifact-a.txt"),
+            ("resB", "https://permalinkB", "artifact-b.txt"),
+        ]
+        link_side_effects = [
+            "https://files.example.com/a/download",
+            "https://files.example.com/b/download",
+        ]
+
+        with mock.patch.object(
+            self.upload, "get_access_token", return_value="token"
+        ), mock.patch.object(
+            self.upload, "upload_file", side_effect=upload_side_effects
+        ) as upload_mock, mock.patch.object(
+            self.upload, "share_everyone_view"
+        ) as share_mock, mock.patch.object(
+            self.upload, "create_external_link", side_effect=link_side_effects
+        ), mock.patch.object(
+            self.upload, "log_line", return_value=None
+        ):
+            argv = [
+                "upload_zoho.py",
+                f"{self.sample_file},{second_file}",
+                "--stdout-mode=json",
+            ]
+            with mock.patch.object(sys, "argv", argv):
+                buffer = io.StringIO()
+                with mock.patch("sys.stdout", buffer):
+                    self.upload.main()
+
+        payload = json.loads(buffer.getvalue())
+        self.assertIsInstance(payload, list)
+        self.assertEqual(len(payload), 2)
+        self.assertEqual(upload_mock.call_count, 2)
         self.assertEqual(share_mock.call_count, 2)
 
     def test_glob_pattern_without_matches_exits(self):

@@ -87,21 +87,28 @@ def resolve_file_path(raw_path: str) -> str:
     sys.exit(color(f"❌ File not found: {raw_path}", RED, True))
 
 
+def _split_raw_entries(raw: str) -> List[str]:
+    segments = [raw] if "," not in raw else raw.split(",")
+    trimmed = [segment.strip() for segment in segments]
+    return [segment for segment in trimmed if segment]
+
+
 def expand_input_paths(raw_paths: Sequence[str]) -> List[str]:
     expanded: List[str] = []
     for raw in raw_paths:
-        candidate = os.path.expanduser(raw)
-        if has_magic(candidate):
-            matches = [
-                path
-                for path in glob(candidate, recursive=True)
-                if os.path.isfile(path)
-            ]
-            if not matches:
-                sys.exit(color(f"❌ No files matched pattern: {raw}", RED, True))
-            expanded.extend(sorted(matches))
-        else:
-            expanded.append(candidate)
+        for entry in _split_raw_entries(raw):
+            candidate = os.path.expanduser(entry)
+            if has_magic(candidate):
+                matches = [
+                    path
+                    for path in glob(candidate, recursive=True)
+                    if os.path.isfile(path)
+                ]
+                if not matches:
+                    sys.exit(color(f"❌ No files matched pattern: {entry}", RED, True))
+                expanded.extend(sorted(matches))
+            else:
+                expanded.append(candidate)
     return expanded
 
 

@@ -7,7 +7,7 @@ branding:
 
 inputs:
   file_path:
-    description: "Local file(s) to upload (newline-separated for multiple, must be inside the GitHub workspace)."
+    description: "Local file(s) to upload (newline- or comma-separated for multiple, must be inside the GitHub workspace)."
     required: true
   remote_name:
     description: "Optional remote name for the uploaded file."
@@ -97,10 +97,27 @@ runs:
         fi
 
         args=()
+        trim() {
+          local value="${1}"
+          value="${value#"${value%%[![:space:]]*}"}"
+          value="${value%"${value##*[![:space:]]}"}"
+          printf '%s' "${value}"
+        }
+
         if [[ -n "${INPUT_FILE_PATH}" ]]; then
           while IFS= read -r line; do
-            [[ -z "${line}" ]] && continue
-            args+=("${line}")
+            local_line="$(trim "${line}")"
+            [[ -z "${local_line}" ]] && continue
+            if [[ "${local_line}" == *,* ]]; then
+              IFS=',' read -ra entries <<< "${local_line}"
+            else
+              entries=("${local_line}")
+            fi
+            for entry in "${entries[@]}"; do
+              trimmed_entry="$(trim "${entry}")"
+              [[ -z "${trimmed_entry}" ]] && continue
+              args+=("${trimmed_entry}")
+            done
           done <<< "${INPUT_FILE_PATH}"
         fi
 
