@@ -244,6 +244,138 @@ class UploadActionTests(unittest.TestCase):
         message = str(ctx.exception)
         self.assertIn("File not found in workspace", message)
 
+    def test_main_multiple_files_json_outputs_all_results(self):
+        second_file = Path(self.tmpdir.name) / "sample2.txt"
+        second_file.write_text("more content")
+
+        output_file = Path(self.tmpdir.name) / "outputs.txt"
+        os.environ["GITHUB_OUTPUT"] = str(output_file)
+        self.addCleanup(os.environ.pop, "GITHUB_OUTPUT", None)
+
+        upload_side_effects = [
+            ("resA", "https://permalinkA", "artifact-a.txt"),
+            ("resB", "https://permalinkB", "artifact-b.txt"),
+        ]
+
+        link_side_effects = [
+            "https://files.example.com/a/download",
+            "https://files.example.com/b/download",
+        ]
+
+        with mock.patch.object(
+            self.upload, "get_access_token", return_value="token"
+        ), mock.patch.object(
+            self.upload, "upload_file", side_effect=upload_side_effects
+        ) as upload_mock, mock.patch.object(
+            self.upload, "share_everyone_view"
+        ) as share_mock, mock.patch.object(
+            self.upload, "create_external_link", side_effect=link_side_effects
+        ), mock.patch.object(
+            self.upload, "log_line", return_value=None
+        ):
+            argv = [
+                "upload_zoho.py",
+                str(self.sample_file),
+                str(second_file),
+                "--stdout-mode=json",
+                "--link-mode=both",
+            ]
+            with mock.patch.object(sys, "argv", argv):
+                buffer = io.StringIO()
+                with mock.patch("sys.stdout", buffer):
+                    self.upload.main()
+
+        payload = json.loads(buffer.getvalue())
+        self.assertIsInstance(payload, list)
+        self.assertEqual(len(payload), 2)
+        first, second = payload
+        self.assertEqual(first["resource_id"], "resA")
+        self.assertEqual(second["resource_id"], "resB")
+        self.assertIn("direct_url", first)
+        self.assertIn("preview_url", second)
+
+        written = output_file.read_text().splitlines()
+        self.assertTrue(any(line.startswith("zoho_results_json=") for line in written))
+        self.assertTrue(any("zoho_direct_url_2" in line for line in written))
+
+        self.assertEqual(upload_mock.call_count, 2)
+        self.assertEqual(share_mock.call_count, 2)
+
+    def test_remote_name_multiple_files_exits(self):
+        second_file = Path(self.tmpdir.name) / "sample2.txt"
+        second_file.write_text("more content")
+
+        with mock.patch.object(
+            self.upload, "get_access_token", return_value="token"
+        ), mock.patch.object(
+            self.upload, "log_line", return_value=None
+        ):
+            argv = [
+                "upload_zoho.py",
+                str(self.sample_file),
+                str(second_file),
+                "--remote-name=custom.bin",
+            ]
+            with mock.patch.object(sys, "argv", argv):
+                with self.assertRaises(SystemExit) as ctx:
+                    self.upload.main()
+
+        self.assertIn("--remote-name", str(ctx.exception))
+
+    def test_glob_pattern_expands_multiple_files(self):
+        png_one = Path(self.tmpdir.name) / "image1.png"
+        png_two = Path(self.tmpdir.name) / "image2.png"
+        png_one.write_bytes(b"one")
+        png_two.write_bytes(b"two")
+
+        with mock.patch.object(
+            self.upload, "get_access_token", return_value="token"
+        ), mock.patch.object(
+            self.upload, "upload_file",
+            side_effect=[
+                ("res1", "https://permalink1", "image1.png"),
+                ("res2", "https://permalink2", "image2.png"),
+            ],
+        ) as upload_mock, mock.patch.object(
+            self.upload, "share_everyone_view"
+        ) as share_mock, mock.patch.object(
+            self.upload, "create_external_link",
+            side_effect=[
+                "https://files.example.com/1/download",
+                "https://files.example.com/2/download",
+            ],
+        ), mock.patch.object(
+            self.upload, "log_line", return_value=None
+        ):
+            argv = [
+                "upload_zoho.py",
+                str(Path(self.tmpdir.name) / "*.png"),
+                "--stdout-mode=json",
+            ]
+            with mock.patch.object(sys, "argv", argv):
+                buffer = io.StringIO()
+                with mock.patch("sys.stdout", buffer):
+                    self.upload.main()
+
+        self.assertEqual(upload_mock.call_count, 2)
+        first_call = upload_mock.call_args_list[0].kwargs["path"]
+        second_call = upload_mock.call_args_list[1].kwargs["path"]
+        self.assertTrue(first_call.endswith("image1.png"))
+        self.assertTrue(second_call.endswith("image2.png"))
+        self.assertEqual(share_mock.call_count, 2)
+
+    def test_glob_pattern_without_matches_exits(self):
+        argv = [
+            "upload_zoho.py",
+            str(Path(self.tmpdir.name) / "*.png"),
+        ]
+
+        with mock.patch.object(sys, "argv", argv):
+            with self.assertRaises(SystemExit) as ctx:
+                self.upload.main()
+
+        self.assertIn("No files matched pattern", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

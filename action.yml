@@ -7,7 +7,7 @@ branding:
 
 inputs:
   file_path:
-    description: "Local file to upload (must be inside the GitHub workspace)."
+    description: "Local file(s) to upload (newline-separated for multiple, must be inside the GitHub workspace)."
     required: true
   remote_name:
     description: "Optional remote name for the uploaded file."
@@ -57,6 +57,9 @@ outputs:
   zoho_remote_name:
     description: "Final filename stored in Zoho WorkDrive (after conflict handling)."
     value: ${{ steps.run_upload.outputs.zoho_remote_name }}
+  zoho_results_json:
+    description: "JSON payload describing every uploaded file (source path, remote name, URLs)."
+    value: ${{ steps.run_upload.outputs.zoho_results_json }}
 
 runs:
   using: "composite"
@@ -93,7 +96,19 @@ runs:
           "${python_bin}" -m pip install --quiet --disable-pip-version-check --no-cache-dir -r "${req_file}"
         fi
 
-        args=("${INPUT_FILE_PATH}")
+        args=()
+        if [[ -n "${INPUT_FILE_PATH}" ]]; then
+          while IFS= read -r line; do
+            [[ -z "${line}" ]] && continue
+            args+=("${line}")
+          done <<< "${INPUT_FILE_PATH}"
+        fi
+
+        if [[ ${#args[@]} -eq 0 ]]; then
+          echo "::error::No file paths provided"
+          exit 1
+        fi
+
         [[ -n "${INPUT_STDOUT_MODE}" ]] && args+=("--stdout-mode=${INPUT_STDOUT_MODE}")
         [[ -n "${INPUT_REMOTE_NAME}" ]] && args+=("--remote-name=${INPUT_REMOTE_NAME}")
         [[ -n "${INPUT_REGION}" ]] && args+=("--region=${INPUT_REGION}")

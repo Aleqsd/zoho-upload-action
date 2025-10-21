@@ -29,12 +29,37 @@ Use the generated outputs anywhere later in the job:
 
 ---
 
+### 📦 Uploading multiple files
+
+Provide several files in a single step by separating the paths with newlines:
+
+```yaml
+- name: Upload multiple assets to Zoho
+  uses: aleqsd/zoho-upload-action@v1
+  with:
+    file_path: |
+      dist/api.tar.gz
+      dist/web-assets.zip
+```
+
+The action uploads each file sequentially, sharing them with the same options (`link_mode`, `share_mode`, etc.). The summary
+logs repeat for every file and the composite output `zoho_results_json` contains a JSON array with metadata and URLs for each
+upload. Existing outputs (`zoho_direct_url`, `zoho_preview_url`, etc.) continue to reflect the first file for backwards
+compatibility, while enumerated keys such as `zoho_direct_url_2` are provided for convenience.
+
+> 💡 **Wildcard support**
+> You can also supply [glob patterns](https://docs.python.org/3/library/glob.html) like `dist/*.png` or `artifacts/**/*.zip`
+> (quoted in YAML) and the action will expand them before uploading. Patterns that do not match any files cause the step to
+> fail fast with guidance.
+
+---
+
 ## ⚙️ Inputs
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `file_path` | – | Local file to upload (required, must reside inside the workflow workspace). |
-| `remote_name` | – | Override the filename stored in WorkDrive. |
+| `file_path` | – | Local file(s) to upload (required, newline-separated to upload multiple files, must reside inside the workflow workspace). |
+| `remote_name` | – | Override the filename stored in WorkDrive (only valid when uploading a single file). |
 | `stdout_mode` | `full` | Control script logging (`full`, `direct`, `json`). |
 | `region` | `us` | Target data centre (`us`, `eu`, `in`, `au`, `jp`, `cn`). |
 | `link_mode` | `direct` | Emit `direct`, `preview`, or `both` URLs. |
@@ -52,6 +77,7 @@ Use the generated outputs anywhere later in the job:
 | `zoho_html_snippet` | `<img>` snippet pointing at the direct link (when available). |
 | `zoho_resource_id` | WorkDrive resource identifier for the uploaded file. |
 | `zoho_remote_name` | Final filename stored in WorkDrive after conflict handling. |
+| `zoho_results_json` | JSON array describing every uploaded file (source path, remote name, URLs). |
 
 > 🗂️ **Workspace access only**  
 > The action can only read files that live inside `${{ github.workspace }}`. Copy or generate build artifacts into that directory (or use `actions/download-artifact` earlier in the job) before invoking the upload step. The script fails fast with guidance when the file is missing or comes from outside the workspace.

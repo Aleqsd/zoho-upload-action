@@ -21,10 +21,12 @@ import mimetypes
 import os
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import requests
+from glob import glob, has_magic
 
 # Terminal styling (GitHub Actions understands ANSI escapes).
 RESET = "\033[0m"
@@ -83,6 +85,24 @@ def resolve_file_path(raw_path: str) -> str:
         sys.exit(color(message, RED, True))
 
     sys.exit(color(f"❌ File not found: {raw_path}", RED, True))
+
+
+def expand_input_paths(raw_paths: Sequence[str]) -> List[str]:
+    expanded: List[str] = []
+    for raw in raw_paths:
+        candidate = os.path.expanduser(raw)
+        if has_magic(candidate):
+            matches = [
+                path
+                for path in glob(candidate, recursive=True)
+                if os.path.isfile(path)
+            ]
+            if not matches:
+                sys.exit(color(f"❌ No files matched pattern: {raw}", RED, True))
+            expanded.extend(sorted(matches))
+        else:
+            expanded.append(candidate)
+    return expanded
 
 
 def color(text: str, ansi: str, enable: bool) -> str:
@@ -368,40 +388,58 @@ def append_outputs(path: str, pairs: Dict[str, str]) -> None:
             handle.write(f"{key}={value}\n")
 
 
+@dataclass
+class UploadResult:
+    source_path: str
+    resource_id: str
+    remote_name: str
+    links: Dict[str, Optional[str]]
+    html_snippet: Optional[str]
+    permalink: Optional[str]
+
+
 def output_full(
     *,
-    resource_id: str,
+    results: Sequence[UploadResult],
     region: str,
     share_mode: str,
     link_mode: str,
-    links: Dict[str, Optional[str]],
-    html_snippet: Optional[str],
     api_base: str,
     enable_color: bool,
 ) -> None:
-    print(
-        color("✅ Upload complete", GREEN, enable_color)
-        + " — "
-        + color(resource_id, BOLD, enable_color)
-    )
-    if "direct" in links and links["direct"]:
+    total = len(results)
+    for idx, result in enumerate(results, 1):
+        prefix = "✅ Upload complete"
+        if total > 1:
+            prefix += f" [{idx}/{total}]"
+        print(color(prefix, GREEN, enable_color) + " — " + color(result.resource_id, BOLD, enable_color))
         print(
             "\n"
-            + color("⚡ Direct download", CYAN, enable_color)
-            + f": {links['direct']}"
+            + color("📄 Remote filename", CYAN, enable_color)
+            + f": {result.remote_name}"
         )
-    if "preview" in links and links["preview"]:
-        print(
-            "\n"
-            + color("🖥️  WorkDrive share", BLUE, enable_color)
-            + f": {links['preview']}"
-        )
-    if html_snippet:
-        print(
-            "\n"
-            + color("🧩 HTML embed", MAGENTA, enable_color)
-            + f":\n{html_snippet}"
-        )
+        direct = result.links.get("direct")
+        preview = result.links.get("preview")
+        if direct:
+            print(
+                "\n"
+                + color("⚡ Direct download", CYAN, enable_color)
+                + f": {direct}"
+            )
+        if preview:
+            print(
+                "\n"
+                + color("🖥️  WorkDrive share", BLUE, enable_color)
+                + f": {preview}"
+            )
+        if result.html_snippet:
+            print(
+                "\n"
+                + color("🧩 HTML embed", MAGENTA, enable_color)
+                + f":\n{result.html_snippet}"
+            )
+        if idx < total:
+            print("\n" + "-" * 40 + "\n")
     print(
         "\n"
         + color("ℹ️  Context", YELLOW, enable_color)
@@ -409,13 +447,29 @@ def output_full(
     )
 
 
-def output_json(resource_id: str, links: Dict[str, Optional[str]], html_snippet: Optional[str]) -> None:
-    payload = {
-        "resource_id": resource_id,
-        "direct_url": links.get("direct"),
-        "preview_url": links.get("preview"),
-        "html": html_snippet,
-    }
+def output_json(results: Sequence[UploadResult]) -> None:
+    if len(results) == 1:
+        result = results[0]
+        payload: object = {
+            "resource_id": result.resource_id,
+            "remote_name": result.remote_name,
+            "direct_url": result.links.get("direct"),
+            "preview_url": result.links.get("preview"),
+            "html": result.html_snippet,
+            "source_path": result.source_path,
+        }
+    else:
+        payload = [
+            {
+                "resource_id": result.resource_id,
+                "remote_name": result.remote_name,
+                "direct_url": result.links.get("direct"),
+                "preview_url": result.links.get("preview"),
+                "html": result.html_snippet,
+                "source_path": result.source_path,
+            }
+            for result in results
+        ]
     print(json.dumps(payload))
 
 
@@ -425,7 +479,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Upload a file to Zoho WorkDrive and emit public URLs."
     )
-    parser.add_argument("file_path", help="Local file to upload.")
+    parser.add_argument("file_paths", nargs="+", help="Local file(s) to upload.")
     parser.add_argument(
         "--stdout-mode",
         choices=("full", "direct", "json"),
@@ -483,82 +537,154 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    expanded_inputs = expand_input_paths(args.file_paths)
+
+    if len(expanded_inputs) > 1 and args.remote_name:
+        sys.exit(color("❌ --remote-name can only be used when uploading a single file.", RED, True))
+
     region, api_base, accounts_base = resolve_endpoints(args.region)
     token = get_access_token(accounts_base)
     log_enabled = args.stdout_mode == "full"
-    target_path = resolve_file_path(args.file_path)
 
-    resource_id, permalink, final_remote_name = upload_file(
-        api_base=api_base,
-        token=token,
-        path=target_path,
-        remote_name=args.remote_name,
-        conflict_mode=args.conflict_mode,
-        max_retries=args.max_retries,
-        retry_delay=args.retry_delay,
-        enable_logs=log_enabled,
-    )
+    target_paths = [resolve_file_path(path) for path in expanded_inputs]
 
-    log_line(f"📄 Remote filename: {final_remote_name}", CYAN, log_enabled)
+    results: List[UploadResult] = []
 
-    links: Dict[str, Optional[str]] = {}
-    html_snippet: Optional[str] = None
+    for index, target_path in enumerate(target_paths, 1):
+        resource_id, permalink, final_remote_name = upload_file(
+            api_base=api_base,
+            token=token,
+            path=target_path,
+            remote_name=args.remote_name,
+            conflict_mode=args.conflict_mode,
+            max_retries=args.max_retries,
+            retry_delay=args.retry_delay,
+            enable_logs=log_enabled,
+        )
 
-    if args.share_mode == "public":
-        share_everyone_view(api_base, token, resource_id, args.max_retries, args.retry_delay, log_enabled)
-        base_link = create_external_link(api_base, token, resource_id, args.max_retries, args.retry_delay, log_enabled)
-        links = compose_links(base_link, args.link_mode)
-        html_snippet = build_html_snippet(links.get("direct"))
-    else:
-        log_line("🔒 Skipping public share; using internal WorkDrive URL.", BLUE, log_enabled)
-        internal_link = permalink or f"https://workdrive.zoho.com/file/{resource_id}"
-        if args.link_mode in ("direct", "both"):
-            links["direct"] = internal_link
-            log_line(
-                "⚠️  Direct downloads require public sharing; emitting the WorkDrive permalink instead.",
-                YELLOW,
-                log_enabled,
+        log_line(
+            f"📄 Remote filename for '{os.path.basename(target_path)}': {final_remote_name}",
+            CYAN,
+            log_enabled,
+        )
+
+        links: Dict[str, Optional[str]] = {}
+        html_snippet: Optional[str] = None
+
+        if args.share_mode == "public":
+            share_everyone_view(
+                api_base, token, resource_id, args.max_retries, args.retry_delay, log_enabled
             )
-        if args.link_mode in ("preview", "both") or args.link_mode == "direct":
-            links["preview"] = internal_link
+            base_link = create_external_link(
+                api_base, token, resource_id, args.max_retries, args.retry_delay, log_enabled
+            )
+            links = compose_links(base_link, args.link_mode)
+            html_snippet = build_html_snippet(links.get("direct"))
+        else:
+            if index == 1:
+                log_line("🔒 Skipping public share; using internal WorkDrive URL.", BLUE, log_enabled)
+            internal_link = permalink or f"https://workdrive.zoho.com/file/{resource_id}"
+            if args.link_mode in ("direct", "both"):
+                links["direct"] = internal_link
+                log_line(
+                    "⚠️  Direct downloads require public sharing; emitting the WorkDrive permalink instead.",
+                    YELLOW,
+                    log_enabled,
+                )
+            if args.link_mode in ("preview", "both") or args.link_mode == "direct":
+                links["preview"] = internal_link
 
-    primary_link = (
-        links.get("direct")
-        if args.link_mode != "preview"
-        else links.get("preview")
-    )
-    if args.stdout_mode == "direct" and not primary_link:
-        sys.exit(color("❌ No direct link available. Consider share_mode=public or link_mode=preview.", RED, True))
+        results.append(
+            UploadResult(
+                source_path=target_path,
+                resource_id=resource_id,
+                remote_name=final_remote_name,
+                links=links,
+                html_snippet=html_snippet,
+                permalink=permalink,
+            )
+        )
 
-    if args.stdout_mode == "full":
+    primary_links: List[str] = []
+    for result in results:
+        if args.link_mode == "preview":
+            link = result.links.get("preview")
+        else:
+            link = result.links.get("direct") or (result.links.get("preview") if args.link_mode == "both" else None)
+        if link:
+            primary_links.append(link)
+        else:
+            primary_links.append("")
+
+    if args.stdout_mode == "direct":
+        missing = [res.source_path for res, link in zip(results, primary_links) if not link]
+        if missing:
+            sys.exit(
+                color(
+                    "❌ No direct link available for: " + ", ".join(missing) + ". Consider share_mode=public or link_mode=preview.",
+                    RED,
+                    True,
+                )
+            )
+        if len(primary_links) == 1:
+            print(primary_links[0])
+        else:
+            print("\n".join(primary_links))
+    elif args.stdout_mode == "json":
+        output_json(results)
+    else:
         output_full(
-            resource_id=resource_id,
+            results=results,
             region=region,
             share_mode=args.share_mode,
             link_mode=args.link_mode,
-            links=links,
-            html_snippet=html_snippet,
             api_base=api_base,
             enable_color=True,
         )
-    elif args.stdout_mode == "direct":
-        if primary_link:
-            print(primary_link)
-    elif args.stdout_mode == "json":
-        output_json(resource_id, links, html_snippet)
 
     outputs_path = args.github_output or os.getenv("GITHUB_OUTPUT")
     if outputs_path:
-        to_write: Dict[str, str] = {"zoho_resource_id": resource_id, "zoho_remote_name": final_remote_name}
-        if links.get("direct"):
-            to_write[args.output_key] = links["direct"]
-            to_write["zoho_direct_url"] = links["direct"]
-        elif links.get("preview"):
-            to_write[args.output_key] = links["preview"]
-        if links.get("preview"):
-            to_write["zoho_preview_url"] = links["preview"]
-        if html_snippet:
-            to_write["zoho_html_snippet"] = html_snippet
+        primary_result = results[0]
+        to_write: Dict[str, str] = {
+            "zoho_resource_id": primary_result.resource_id,
+            "zoho_remote_name": primary_result.remote_name,
+            "zoho_results_json": json.dumps(
+                [
+                    {
+                        "source_path": result.source_path,
+                        "resource_id": result.resource_id,
+                        "remote_name": result.remote_name,
+                        "direct_url": result.links.get("direct"),
+                        "preview_url": result.links.get("preview"),
+                        "html": result.html_snippet,
+                    }
+                    for result in results
+                ]
+            ),
+        }
+        direct_primary = primary_result.links.get("direct")
+        preview_primary = primary_result.links.get("preview")
+        if direct_primary:
+            to_write[args.output_key] = direct_primary
+            to_write["zoho_direct_url"] = direct_primary
+        elif preview_primary:
+            to_write[args.output_key] = preview_primary
+        if preview_primary:
+            to_write["zoho_preview_url"] = preview_primary
+        if primary_result.html_snippet:
+            to_write["zoho_html_snippet"] = primary_result.html_snippet
+
+        for idx, result in enumerate(results, 1):
+            suffix = str(idx)
+            to_write[f"zoho_resource_id_{suffix}"] = result.resource_id
+            to_write[f"zoho_remote_name_{suffix}"] = result.remote_name
+            if result.links.get("direct"):
+                to_write[f"zoho_direct_url_{suffix}"] = result.links["direct"]
+            if result.links.get("preview"):
+                to_write[f"zoho_preview_url_{suffix}"] = result.links["preview"]
+            if result.html_snippet:
+                to_write[f"zoho_html_snippet_{suffix}"] = result.html_snippet
+
         append_outputs(outputs_path, to_write)
 
 
