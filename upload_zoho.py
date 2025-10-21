@@ -195,11 +195,11 @@ def upload_file(
 
     while True:
         for attempt in range(1, max_retries + 1):
-            log_line(
-                f"⏳ Uploading '{current_name}' (attempt {attempt}/{max_retries})",
-                CYAN,
-                enable_logs,
-            )
+            if attempt == 1:
+                message = f"⏳ Uploading '{current_name}'"
+            else:
+                message = f"⏳ Uploading '{current_name}' (attempt {attempt}/{max_retries})"
+            log_line(message, CYAN, enable_logs)
             content_type, _ = mimetypes.guess_type(current_name)
             data = {"parent_id": FOLDER_ID}
             if override_existing:
@@ -354,8 +354,10 @@ def create_external_link(api_base: str, token: str, resource_id: str, max_retrie
         try:
             response = requests.post(url, headers=headers, json=payload, timeout=30)
             response.raise_for_status()
-            log_line("🔗 External download link created.", GREEN, enable_logs)
-            return response.json()["data"]["attributes"]["download_url"]
+            data = response.json()
+            download_url = data["data"]["attributes"]["download_url"]
+            log_line(f"🔗 External download link created: {download_url}", GREEN, enable_logs)
+            return download_url
         except requests.HTTPError as http_err:
             status = http_err.response.status_code
             if status >= 500 and attempt < max_retries:
