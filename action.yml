@@ -40,6 +40,18 @@ inputs:
     description: "Delay between retries in seconds."
     required: false
     default: "2"
+  access_token:
+    description: "Optional pre-generated Zoho access token to skip refresh calls."
+    required: false
+    default: ""
+  token_max_retries:
+    description: "Retry count for access-token refresh calls."
+    required: false
+    default: "8"
+  token_retry_delay:
+    description: "Delay between token refresh retries in seconds."
+    required: false
+    default: "12"
 
 outputs:
   zoho_direct_url:
@@ -84,6 +96,9 @@ runs:
         INPUT_CONFLICT_MODE: ${{ inputs.conflict_mode }}
         INPUT_MAX_RETRIES: ${{ inputs.max_retries }}
         INPUT_RETRY_DELAY: ${{ inputs.retry_delay }}
+        INPUT_ACCESS_TOKEN: ${{ inputs.access_token }}
+        INPUT_TOKEN_MAX_RETRIES: ${{ inputs.token_max_retries }}
+        INPUT_TOKEN_RETRY_DELAY: ${{ inputs.token_retry_delay }}
       run: |
         python_bin="${PYTHON_BIN:-$(command -v python3 || command -v python || true)}"
         if [[ -z "${python_bin}" ]]; then

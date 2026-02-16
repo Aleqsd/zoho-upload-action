@@ -67,8 +67,11 @@ compatibility, while enumerated keys such as `zoho_direct_url_2` are provided fo
 | `link_mode` | `direct` | Emit `direct`, `preview`, or `both` URLs. |
 | `share_mode` | `public` | `public` applies "Everyone on the internet" permissions; `skip` keeps the file private. |
 | `conflict_mode` | `abort` | `abort` (default), `rename` (append UTC timestamp), or `replace` (trash the existing file first). |
+| `access_token` | – | Optional Zoho access token to skip `refresh_token` calls and keep multiple uploads concurrent without re-auth storms. |
 | `max_retries` | `3` | Retry count for upload/link API calls. |
 | `retry_delay` | `2` | Seconds to wait between retries. |
+| `token_max_retries` | `8` | Retry count for access-token refresh calls. |
+| `token_retry_delay` | `12` | Seconds to wait between token refresh retries (increases with exponential backoff). |
 
 ## 📤 Outputs
 
@@ -130,7 +133,9 @@ Set `share_mode: public` (default) to grant "Everyone on the internet" view acce
 
 ## ⏱️ Reliability helpers
 
-Large uploads or transient Zoho issues are handled with `max_retries` and `retry_delay`. Progress logs (⏳/🔁 icons) only appear when `stdout_mode=full`, keeping other modes clean.
+Large uploads or transient Zoho issues are handled with `max_retries` and `retry_delay`.
+Token refresh failures also retry with `token_max_retries` / `token_retry_delay` and exponential backoff (`2^attempt`),
+which helps reduce `Access Denied` throttling when several upload jobs run at once.
 
 ---
 

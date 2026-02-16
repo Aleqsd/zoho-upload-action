@@ -191,6 +191,36 @@ class UploadActionTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         sleeper.assert_called_once()
 
+    def test_get_access_token_retries_on_rate_limit(self):
+        responses = [
+            FakeResponse(
+                400,
+                {"error": "Access Denied", "status": "failure"},
+                "You have made too many requests continuously. Please try again after some time.",
+            ),
+            FakeResponse(
+                200,
+                {"access_token": "refreshed-token"},
+                "",
+            ),
+        ]
+
+        def fake_post(*args, **kwargs):
+            return responses.pop(0)
+
+        with mock.patch.object(self.upload.requests, "post", side_effect=fake_post), mock.patch.object(
+            self.upload.time, "sleep", return_value=None
+        ) as sleeper:
+            token = self.upload.get_access_token(
+                "https://accounts.zoho.com",
+                max_retries=3,
+                retry_delay=2,
+                enable_logs=False,
+            )
+
+        self.assertEqual(token, "refreshed-token")
+        self.assertEqual(sleeper.call_count, 1)
+
     def test_main_share_skip_uses_internal_link(self):
         internal_link = "https://workdrive.zoho.com/file/internal123"
         with mock.patch.object(
@@ -406,6 +436,38 @@ class UploadActionTests(unittest.TestCase):
         self.assertEqual(len(payload), 2)
         self.assertEqual(upload_mock.call_count, 2)
         self.assertEqual(share_mock.call_count, 2)
+
+    def test_main_uses_provided_access_token(self):
+        output_file = Path(self.tmpdir.name) / "outputs.txt"
+        os.environ["GITHUB_OUTPUT"] = str(output_file)
+        os.environ["ZOHO_ACCESS_TOKEN"] = "manual-token"
+        self.addCleanup(lambda: os.environ.pop("ZOHO_ACCESS_TOKEN", None))
+        self.addCleanup(lambda: os.environ.pop("GITHUB_OUTPUT", None))
+
+        with mock.patch.object(
+            self.upload, "get_access_token", side_effect=AssertionError("should not refresh token")
+        ), mock.patch.object(
+            self.upload, "upload_file", return_value=("resABC", "https://permalink", "artifact.txt")
+        ), mock.patch.object(
+            self.upload, "share_everyone_view"
+        ) as share_mock, mock.patch.object(
+            self.upload, "create_external_link", return_value="https://files.example.com/download"
+        ), mock.patch.object(
+            self.upload, "log_line", return_value=None
+        ):
+            argv = [
+                "upload_zoho.py",
+                str(self.sample_file),
+                "--stdout-mode=json",
+            ]
+            with mock.patch.object(sys, "argv", argv):
+                buffer = io.StringIO()
+                with mock.patch("sys.stdout", buffer):
+                    self.upload.main()
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(payload["resource_id"], "resABC")
+        share_mock.assert_called_once()
 
     def test_glob_pattern_without_matches_exits(self):
         argv = [

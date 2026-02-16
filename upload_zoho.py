@@ -52,6 +52,7 @@ CLIENT_ID = os.getenv("ZOHO_CLIENT_ID")
 CLIENT_SECRET = os.getenv("ZOHO_CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("ZOHO_REFRESH_TOKEN")
 FOLDER_ID = os.getenv("ZOHO_FOLDER_ID")
+ACCESS_TOKEN = os.getenv("ZOHO_ACCESS_TOKEN") or os.getenv("INPUT_ACCESS_TOKEN")
 
 
 def is_within(path: str, parent: str) -> bool:
@@ -137,31 +138,69 @@ def resolve_endpoints(region: str) -> Tuple[str, str, str]:
     return region, api_base, accounts_base
 
 
-def get_access_token(accounts_base: str) -> str:
-    response = requests.post(
-        f"{accounts_base}/oauth/v2/token",
-        data={
-            "refresh_token": REFRESH_TOKEN,
-            "client_id": CLIENT_ID,
-            "client_secret": CLIENT_SECRET,
-            "grant_type": "refresh_token",
-        },
-        timeout=20,
+def _is_retryable_refresh(status: int, body: str) -> bool:
+    lower = body.lower()
+    if status == 429 or status >= 500:
+        return True
+    return status == 400 and (
+        "access denied" in lower or "rate" in lower or "too many requests" in lower
     )
-    try:
-        response.raise_for_status()
-    except requests.HTTPError:
-        sys.exit(
-            color(
-                f"❌ Token refresh failed: {response.status_code} {response.text}",
-                RED,
-                True,
+
+
+def get_access_token(
+    accounts_base: str,
+    *,
+    max_retries: int,
+    retry_delay: float,
+    enable_logs: bool,
+) -> str:
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = requests.post(
+                f"{accounts_base}/oauth/v2/token",
+                data={
+                    "refresh_token": REFRESH_TOKEN,
+                    "client_id": CLIENT_ID,
+                    "client_secret": CLIENT_SECRET,
+                    "grant_type": "refresh_token",
+                },
+                timeout=20,
             )
-        )
-    token = response.json().get("access_token")
-    if not token:
-        sys.exit(color(f"❌ No access_token in refresh response: {response.text}", RED, True))
-    return token
+        except requests.RequestException as exc:
+            if attempt >= max_retries:
+                sys.exit(color(f"❌ Token refresh failed: {exc}", RED, True))
+            delay = retry_delay * (2 ** (attempt - 1))
+            log_line(
+                f"🔁 Token refresh network error; retrying in {delay:.0f}s…",
+                YELLOW,
+                enable_logs,
+            )
+            time.sleep(delay)
+            continue
+
+        try:
+            response.raise_for_status()
+        except requests.HTTPError:
+            body = response.text or ""
+            if attempt < max_retries and _is_retryable_refresh(response.status_code, body):
+                delay = retry_delay * (2 ** (attempt - 1))
+                log_line(
+                    f"🔁 Token refresh failed ({response.status_code}); retrying in {delay:.0f}s…",
+                    YELLOW,
+                    enable_logs,
+                )
+                time.sleep(delay)
+                continue
+            sys.exit(color(f"❌ Token refresh failed: {response.status_code} {body}", RED, True))
+
+        token = response.json().get("access_token")
+        if not token:
+            sys.exit(
+                color(f"❌ No access_token in refresh response: {response.text}", RED, True)
+            )
+        return token
+
+    sys.exit(color("❌ Token refresh failed after all retries.", RED, True))
 
 
 def auth_header(token: str) -> Dict[str, str]:
@@ -483,11 +522,10 @@ def output_json(results: Sequence[UploadResult]) -> None:
 
 
 def main() -> None:
-    need("CLIENT_ID", "CLIENT_SECRET", "REFRESH_TOKEN", "FOLDER_ID")
-
     parser = argparse.ArgumentParser(
         description="Upload a file to Zoho WorkDrive and emit public URLs."
     )
+
     parser.add_argument("file_paths", nargs="+", help="Local file(s) to upload.")
     parser.add_argument(
         "--stdout-mode",
@@ -543,8 +581,30 @@ def main() -> None:
         default=float(os.getenv("ZOHO_RETRY_DELAY", "2")),
         help="Delay in seconds between retries (default: 2).",
     )
+    parser.add_argument(
+        "--access-token",
+        default=ACCESS_TOKEN or "",
+        help="Optional access token to reuse across concurrent uploads.",
+    )
+    parser.add_argument(
+        "--token-max-retries",
+        type=int,
+        default=int(os.getenv("ZOHO_TOKEN_MAX_RETRIES", "8")),
+        help="Number of retries for token refresh calls (default: 8).",
+    )
+    parser.add_argument(
+        "--token-retry-delay",
+        type=float,
+        default=float(os.getenv("ZOHO_TOKEN_RETRY_DELAY", "12")),
+        help="Delay in seconds between token refresh retries (default: 12).",
+    )
 
     args = parser.parse_args()
+
+    if args.access_token:
+        need("FOLDER_ID")
+    else:
+        need("CLIENT_ID", "CLIENT_SECRET", "REFRESH_TOKEN", "FOLDER_ID")
 
     expanded_inputs = expand_input_paths(args.file_paths)
 
@@ -552,7 +612,12 @@ def main() -> None:
         sys.exit(color("❌ --remote-name can only be used when uploading a single file.", RED, True))
 
     region, api_base, accounts_base = resolve_endpoints(args.region)
-    token = get_access_token(accounts_base)
+    token = args.access_token or get_access_token(
+        accounts_base,
+        max_retries=args.token_max_retries,
+        retry_delay=args.token_retry_delay,
+        enable_logs=args.stdout_mode == "full",
+    )
     log_enabled = args.stdout_mode == "full"
 
     target_paths = [resolve_file_path(path) for path in expanded_inputs]
