@@ -133,7 +133,8 @@ Set `share_mode: public` (default) to grant "Everyone on the internet" view acce
 
 ## ⏱️ Reliability helpers
 
-Large uploads or transient Zoho issues are handled with `max_retries` and `retry_delay`.
+Large uploads, transient Zoho issues, and WorkDrive `429` rate limits are handled with `max_retries` and `retry_delay`.
+When Zoho sends `Retry-After`, the action waits that long before retrying; otherwise retries use exponential backoff.
 Token refresh failures also retry with `token_max_retries` / `token_retry_delay` and exponential backoff (`2^attempt`),
 which helps reduce `Access Denied` throttling when several upload jobs run at once.
 

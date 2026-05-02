@@ -20,9 +20,10 @@ ENV_VARS = {
 
 
 class FakeResponse:
-    def __init__(self, status_code, json_data=None, text=""):
+    def __init__(self, status_code, json_data=None, text="", headers=None):
         self.status_code = status_code
         self._json = json_data
+        self.headers = headers or {}
         if text:
             self.text = text
         elif json_data is not None:
@@ -190,6 +191,95 @@ class UploadActionTests(unittest.TestCase):
         self.assertEqual(res_id, "res500")
         self.assertEqual(len(calls), 2)
         sleeper.assert_called_once()
+
+    def test_retry_on_rate_limit_uses_retry_after_for_upload(self):
+        responses = [
+            FakeResponse(
+                429,
+                None,
+                '{"errors":[{"id":"F7008","title":"Request rate limit exceeded."}]}',
+                {"Retry-After": "7"},
+            ),
+            FakeResponse(
+                200,
+                {"data": [{"id": "res429", "attributes": {"Permalink": "https://p"}}]},
+                "",
+            ),
+        ]
+
+        def fake_post(url, headers=None, files=None, data=None, timeout=None, json=None):
+            return responses.pop(0)
+
+        with mock.patch.object(self.upload.requests, "post", side_effect=fake_post):
+            with mock.patch.object(self.upload.time, "sleep", return_value=None) as sleeper:
+                res_id, _, _ = self.upload.upload_file(
+                    api_base="https://api",
+                    token="token",
+                    path=str(self.sample_file),
+                    remote_name="artifact.txt",
+                    conflict_mode="abort",
+                    max_retries=3,
+                    retry_delay=2,
+                    enable_logs=False,
+                )
+
+        self.assertEqual(res_id, "res429")
+        sleeper.assert_called_once_with(7.0)
+
+    def test_share_retries_on_rate_limit(self):
+        responses = [
+            FakeResponse(429, None, "rate limited"),
+            FakeResponse(200, {}, ""),
+        ]
+
+        def fake_post(*args, **kwargs):
+            return responses.pop(0)
+
+        with mock.patch.object(
+            self.upload.requests, "post", side_effect=fake_post
+        ) as post_mock:
+            with mock.patch.object(self.upload.time, "sleep", return_value=None) as sleeper:
+                self.upload.share_everyone_view(
+                    api_base="https://api",
+                    token="token",
+                    resource_id="res",
+                    max_retries=3,
+                    retry_delay=4,
+                    enable_logs=False,
+                )
+
+        self.assertEqual(post_mock.call_count, 2)
+        sleeper.assert_called_once_with(4)
+
+    def test_create_external_link_retries_on_rate_limit(self):
+        responses = [
+            FakeResponse(429, None, "rate limited"),
+            FakeResponse(
+                200,
+                {"data": {"attributes": {"download_url": "https://files.example/download"}}},
+                "",
+            ),
+        ]
+
+        def fake_post(*args, **kwargs):
+            return responses.pop(0)
+
+        with mock.patch.object(
+            self.upload.requests, "post", side_effect=fake_post
+        ) as post_mock:
+            with mock.patch.object(self.upload.time, "sleep", return_value=None) as sleeper:
+                link = self.upload.create_external_link(
+                    api_base="https://api",
+                    token="token",
+                    resource_id="res",
+                    max_retries=3,
+                    retry_delay=5,
+                    enable_logs=False,
+                )
+
+        self.assertEqual(link, "https://files.example/download")
+        self.assertEqual(post_mock.call_count, 2)
+        sleeper.assert_called_once_with(5)
 
     def test_get_access_token_retries_on_rate_limit(self):
         responses = [

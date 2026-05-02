@@ -23,6 +23,7 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import requests
@@ -147,6 +148,35 @@ def _is_retryable_refresh(status: int, body: str) -> bool:
     )
 
 
+def _is_retryable_api_status(status: int) -> bool:
+    return status == 429 or status >= 500
+
+
+def _retry_delay_seconds(
+    retry_delay: float,
+    attempt: int,
+    response: Optional[requests.Response] = None,
+) -> float:
+    if response is not None:
+        retry_after = getattr(response, "headers", {}).get("Retry-After")
+        if retry_after:
+            try:
+                delay = float(retry_after)
+                if delay >= 0:
+                    return delay
+            except ValueError:
+                try:
+                    retry_at = parsedate_to_datetime(retry_after)
+                    if retry_at.tzinfo is None:
+                        retry_at = retry_at.replace(tzinfo=timezone.utc)
+                    delay = (retry_at - datetime.now(timezone.utc)).total_seconds()
+                    return max(0.0, delay)
+                except (TypeError, ValueError, IndexError, OverflowError):
+                    pass
+
+    return retry_delay * (2 ** (attempt - 1))
+
+
 def get_access_token(
     accounts_base: str,
     *,
@@ -262,8 +292,9 @@ def upload_file(
             except requests.RequestException as exc:
                 if attempt == max_retries:
                     sys.exit(color(f"❌ Upload failed: {exc}", RED, True))
-                log_line(f"🔁 Network error ({exc}); retrying in {retry_delay}s…", YELLOW, enable_logs)
-                time.sleep(retry_delay)
+                delay = _retry_delay_seconds(retry_delay, attempt)
+                log_line(f"🔁 Network error ({exc}); retrying in {delay:.0f}s…", YELLOW, enable_logs)
+                time.sleep(delay)
                 continue
 
             try:
@@ -305,13 +336,14 @@ def upload_file(
                         log_line(f"♻️  Conflict detected; retrying with '{new_name}'.", MAGENTA, enable_logs)
                         current_name = new_name
                         break
-                elif status >= 500 and attempt < max_retries:
+                elif _is_retryable_api_status(status) and attempt < max_retries:
+                    delay = _retry_delay_seconds(retry_delay, attempt, response)
                     log_line(
-                        f"🔁 Zoho responded with {status}; retrying in {retry_delay}s…",
+                        f"🔁 Zoho responded with {status}; retrying in {delay:.0f}s…",
                         YELLOW,
                         enable_logs,
                     )
-                    time.sleep(retry_delay)
+                    time.sleep(delay)
                     continue
                 else:
                     sys.exit(color(f"❌ Upload failed: {status} {response.text}", RED, True))
@@ -358,16 +390,18 @@ def share_everyone_view(api_base: str, token: str, resource_id: str, max_retries
             return
         except requests.HTTPError as http_err:
             status = http_err.response.status_code
-            if status >= 500 and attempt < max_retries:
-                log_line(f"🔁 Share API error {status}; retrying in {retry_delay}s…", YELLOW, enable_logs)
-                time.sleep(retry_delay)
+            if _is_retryable_api_status(status) and attempt < max_retries:
+                delay = _retry_delay_seconds(retry_delay, attempt, http_err.response)
+                log_line(f"🔁 Share API error {status}; retrying in {delay:.0f}s…", YELLOW, enable_logs)
+                time.sleep(delay)
                 continue
             sys.exit(color(f"❌ Share everyone failed: {status} {http_err.response.text}", RED, True))
         except requests.RequestException as exc:
             if attempt == max_retries:
                 sys.exit(color(f"❌ Share everyone failed: {exc}", RED, True))
-            log_line(f"🔁 Share request error ({exc}); retrying in {retry_delay}s…", YELLOW, enable_logs)
-            time.sleep(retry_delay)
+            delay = _retry_delay_seconds(retry_delay, attempt)
+            log_line(f"🔁 Share request error ({exc}); retrying in {delay:.0f}s…", YELLOW, enable_logs)
+            time.sleep(delay)
 
 
 def create_external_link(api_base: str, token: str, resource_id: str, max_retries: int, retry_delay: float, enable_logs: bool) -> str:
@@ -399,16 +433,18 @@ def create_external_link(api_base: str, token: str, resource_id: str, max_retrie
             return download_url
         except requests.HTTPError as http_err:
             status = http_err.response.status_code
-            if status >= 500 and attempt < max_retries:
-                log_line(f"🔁 Link API error {status}; retrying in {retry_delay}s…", YELLOW, enable_logs)
-                time.sleep(retry_delay)
+            if _is_retryable_api_status(status) and attempt < max_retries:
+                delay = _retry_delay_seconds(retry_delay, attempt, http_err.response)
+                log_line(f"🔁 Link API error {status}; retrying in {delay:.0f}s…", YELLOW, enable_logs)
+                time.sleep(delay)
                 continue
             sys.exit(color(f"❌ Create link failed: {status} {http_err.response.text}", RED, True))
         except requests.RequestException as exc:
             if attempt == max_retries:
                 sys.exit(color(f"❌ Create link failed: {exc}", RED, True))
-            log_line(f"🔁 Link request error ({exc}); retrying in {retry_delay}s…", YELLOW, enable_logs)
-            time.sleep(retry_delay)
+            delay = _retry_delay_seconds(retry_delay, attempt)
+            log_line(f"🔁 Link request error ({exc}); retrying in {delay:.0f}s…", YELLOW, enable_logs)
+            time.sleep(delay)
     sys.exit(color("❌ Unable to create download link after retries.", RED, True))
 
 
@@ -583,7 +619,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--access-token",
-        default=ACCESS_TOKEN or "",
+        default=(
+            os.getenv("ZOHO_ACCESS_TOKEN")
+            or os.getenv("INPUT_ACCESS_TOKEN")
+            or ACCESS_TOKEN
+            or ""
+        ),
         help="Optional access token to reuse across concurrent uploads.",
     )
     parser.add_argument(
