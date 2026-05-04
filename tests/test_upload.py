@@ -369,6 +369,7 @@ class UploadActionTests(unittest.TestCase):
         second_file.write_text("more content")
 
         output_file = Path(self.tmpdir.name) / "outputs.txt"
+        results_file = Path(self.tmpdir.name) / "results.json"
         os.environ["GITHUB_OUTPUT"] = str(output_file)
         self.addCleanup(os.environ.pop, "GITHUB_OUTPUT", None)
 
@@ -399,6 +400,7 @@ class UploadActionTests(unittest.TestCase):
                 str(second_file),
                 "--stdout-mode=json",
                 "--link-mode=both",
+                f"--results-json-file={results_file}",
             ]
             with mock.patch.object(sys, "argv", argv):
                 buffer = io.StringIO()
@@ -416,10 +418,64 @@ class UploadActionTests(unittest.TestCase):
 
         written = output_file.read_text().splitlines()
         self.assertTrue(any(line.startswith("zoho_results_json=") for line in written))
+        self.assertTrue(any(line.startswith("zoho_results_file=") for line in written))
         self.assertTrue(any("zoho_direct_url_2" in line for line in written))
+        self.assertEqual(json.loads(results_file.read_text()), payload)
 
         self.assertEqual(upload_mock.call_count, 2)
         self.assertEqual(share_mock.call_count, 2)
+
+    def test_large_results_json_is_only_written_to_file(self):
+        second_file = Path(self.tmpdir.name) / "sample2.txt"
+        second_file.write_text("more content")
+
+        output_file = Path(self.tmpdir.name) / "outputs.txt"
+        results_file = Path(self.tmpdir.name) / "results.json"
+        os.environ["GITHUB_OUTPUT"] = str(output_file)
+        self.addCleanup(os.environ.pop, "GITHUB_OUTPUT", None)
+
+        with mock.patch.object(
+            self.upload, "get_access_token", return_value="token"
+        ), mock.patch.object(
+            self.upload,
+            "upload_file",
+            side_effect=[
+                ("resA", "https://permalinkA", "artifact-a.txt"),
+                ("resB", "https://permalinkB", "artifact-b.txt"),
+            ],
+        ), mock.patch.object(
+            self.upload, "share_everyone_view"
+        ), mock.patch.object(
+            self.upload,
+            "create_external_link",
+            side_effect=[
+                "https://files.example.com/a/download",
+                "https://files.example.com/b/download",
+            ],
+        ), mock.patch.object(
+            self.upload, "log_line", return_value=None
+        ):
+            argv = [
+                "upload_zoho.py",
+                str(self.sample_file),
+                str(second_file),
+                "--stdout-mode=json",
+                f"--results-json-file={results_file}",
+                "--results-json-output-limit=10",
+            ]
+            with mock.patch.object(sys, "argv", argv):
+                buffer = io.StringIO()
+                with mock.patch("sys.stdout", buffer):
+                    self.upload.main()
+
+        output_pairs = dict(
+            line.split("=", 1)
+            for line in output_file.read_text().splitlines()
+            if "=" in line
+        )
+        self.assertEqual(output_pairs["zoho_results_json"], "")
+        self.assertEqual(output_pairs["zoho_results_file"], str(results_file.resolve()))
+        self.assertEqual(len(json.loads(results_file.read_text())), 2)
 
     def test_remote_name_multiple_files_exits(self):
         second_file = Path(self.tmpdir.name) / "sample2.txt"

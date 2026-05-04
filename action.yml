@@ -52,6 +52,10 @@ inputs:
     description: "Delay between token refresh retries in seconds."
     required: false
     default: "12"
+  results_json_output_limit:
+    description: "Maximum byte size for the zoho_results_json output. Larger payloads are only written to zoho_results_file."
+    required: false
+    default: "65536"
 
 outputs:
   zoho_direct_url:
@@ -72,6 +76,9 @@ outputs:
   zoho_results_json:
     description: "JSON payload describing every uploaded file (source path, remote name, URLs)."
     value: ${{ steps.run_upload.outputs.zoho_results_json }}
+  zoho_results_file:
+    description: "Path to a JSON file containing the full uploaded-file results."
+    value: ${{ steps.run_upload.outputs.zoho_results_file }}
 
 runs:
   using: "composite"
@@ -99,6 +106,7 @@ runs:
         INPUT_ACCESS_TOKEN: ${{ inputs.access_token }}
         INPUT_TOKEN_MAX_RETRIES: ${{ inputs.token_max_retries }}
         INPUT_TOKEN_RETRY_DELAY: ${{ inputs.token_retry_delay }}
+        INPUT_RESULTS_JSON_OUTPUT_LIMIT: ${{ inputs.results_json_output_limit }}
       run: |
         python_bin="${PYTHON_BIN:-$(command -v python3 || command -v python || true)}"
         if [[ -z "${python_bin}" ]]; then
@@ -149,5 +157,9 @@ runs:
         [[ -n "${INPUT_CONFLICT_MODE}" ]] && args+=("--conflict-mode=${INPUT_CONFLICT_MODE}")
         [[ -n "${INPUT_MAX_RETRIES}" ]] && args+=("--max-retries=${INPUT_MAX_RETRIES}")
         [[ -n "${INPUT_RETRY_DELAY}" ]] && args+=("--retry-delay=${INPUT_RETRY_DELAY}")
+        [[ -n "${INPUT_RESULTS_JSON_OUTPUT_LIMIT}" ]] && args+=("--results-json-output-limit=${INPUT_RESULTS_JSON_OUTPUT_LIMIT}")
+
+        results_file="${RUNNER_TEMP:-${GITHUB_WORKSPACE:-.}}/zoho-results-${GITHUB_RUN_ID:-local}-${GITHUB_ACTION:-run_upload}-${RANDOM}.json"
+        args+=("--results-json-file=${results_file}")
 
         "${python_bin}" "${GITHUB_ACTION_PATH}/upload_zoho.py" "${args[@]}"

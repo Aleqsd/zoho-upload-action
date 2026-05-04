@@ -45,9 +45,11 @@ Provide several files in a single step by separating the paths with newlines or 
 ```
 
 The action uploads each file sequentially, sharing them with the same options (`link_mode`, `share_mode`, etc.). The summary
-logs repeat for every file and the composite output `zoho_results_json` contains a JSON array with metadata and URLs for each
+logs repeat for every file and the composite output `zoho_results_file` points to a JSON file with metadata and URLs for each
 upload. Existing outputs (`zoho_direct_url`, `zoho_preview_url`, etc.) continue to reflect the first file for backwards
-compatibility, while enumerated keys such as `zoho_direct_url_2` are provided for convenience.
+compatibility, while enumerated keys such as `zoho_direct_url_2` are provided for convenience. For smaller batches,
+`zoho_results_json` still contains the same JSON inline; for larger batches it is left empty to avoid GitHub Actions argument
+and environment-size limits.
 
 > 💡 **Wildcard support**
 > You can also supply [glob patterns](https://docs.python.org/3/library/glob.html) like `dist/*.png` or `artifacts/**/*.zip`
@@ -72,6 +74,7 @@ compatibility, while enumerated keys such as `zoho_direct_url_2` are provided fo
 | `retry_delay` | `2` | Seconds to wait between retries. |
 | `token_max_retries` | `8` | Retry count for access-token refresh calls. |
 | `token_retry_delay` | `12` | Seconds to wait between token refresh retries (increases with exponential backoff). |
+| `results_json_output_limit` | `65536` | Maximum UTF-8 byte size for inline `zoho_results_json`; larger payloads are only written to `zoho_results_file`. |
 
 ## 📤 Outputs
 
@@ -82,7 +85,8 @@ compatibility, while enumerated keys such as `zoho_direct_url_2` are provided fo
 | `zoho_html_snippet` | `<img>` snippet pointing at the direct link (when available). |
 | `zoho_resource_id` | WorkDrive resource identifier for the uploaded file. |
 | `zoho_remote_name` | Final filename stored in WorkDrive after conflict handling. |
-| `zoho_results_json` | JSON array describing every uploaded file (source path, remote name, URLs). |
+| `zoho_results_json` | JSON array describing every uploaded file, when the payload is below `results_json_output_limit`. |
+| `zoho_results_file` | Path to a JSON file containing the full uploaded-file results. |
 
 > 🗂️ **Workspace access only**  
 > The action can only read files that live inside `${{ github.workspace }}`. Copy or generate build artifacts into that directory (or use `actions/download-artifact` earlier in the job) before invoking the upload step. The script fails fast with guidance when the file is missing or comes from outside the workspace.

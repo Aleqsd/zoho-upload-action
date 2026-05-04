@@ -530,31 +530,43 @@ def output_full(
         + f": region={region.upper()} · share_mode={share_mode} · link_mode={link_mode} · api_base={api_base}"
     )
 
-
-def output_json(results: Sequence[UploadResult]) -> None:
-    if len(results) == 1:
-        result = results[0]
-        payload: object = {
+def results_payload(results: Sequence[UploadResult]) -> List[Dict[str, Optional[str]]]:
+    return [
+        {
+            "source_path": result.source_path,
             "resource_id": result.resource_id,
             "remote_name": result.remote_name,
             "direct_url": result.links.get("direct"),
             "preview_url": result.links.get("preview"),
             "html": result.html_snippet,
-            "source_path": result.source_path,
         }
-    else:
-        payload = [
-            {
-                "resource_id": result.resource_id,
-                "remote_name": result.remote_name,
-                "direct_url": result.links.get("direct"),
-                "preview_url": result.links.get("preview"),
-                "html": result.html_snippet,
-                "source_path": result.source_path,
-            }
-            for result in results
-        ]
-    print(json.dumps(payload))
+        for result in results
+    ]
+
+
+def stdout_payload(results: Sequence[UploadResult]) -> object:
+    payload = results_payload(results)
+    if len(payload) == 1:
+        return payload[0]
+    return payload
+
+
+def write_results_file(path: str, results: Sequence[UploadResult]) -> None:
+    output_path = os.path.abspath(path)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as handle:
+        json.dump(results_payload(results), handle)
+
+
+def output_json(results: Sequence[UploadResult]) -> None:
+    print(json.dumps(stdout_payload(results)))
+
+
+def compact_results_json(results: Sequence[UploadResult], output_limit: int) -> str:
+    payload = json.dumps(results_payload(results))
+    if output_limit >= 0 and len(payload.encode("utf-8")) > output_limit:
+        return ""
+    return payload
 
 
 def main() -> None:
@@ -577,6 +589,19 @@ def main() -> None:
         "--output-key",
         default="zoho_direct_url",
         help="Primary output key for backward compatibility (default: zoho_direct_url).",
+    )
+    parser.add_argument(
+        "--results-json-file",
+        help="Optional path where the full multi-upload JSON results should be written.",
+    )
+    parser.add_argument(
+        "--results-json-output-limit",
+        type=int,
+        default=int(os.getenv("ZOHO_RESULTS_JSON_OUTPUT_LIMIT", "65536")),
+        help=(
+            "Maximum UTF-8 byte size for the zoho_results_json GitHub output. "
+            "Oversized payloads are only written to --results-json-file. Use -1 to disable the limit."
+        ),
     )
     parser.add_argument(
         "--remote-name",
@@ -757,26 +782,22 @@ def main() -> None:
             enable_color=True,
         )
 
+    if args.results_json_file:
+        write_results_file(args.results_json_file, results)
+
     outputs_path = args.github_output or os.getenv("GITHUB_OUTPUT")
     if outputs_path:
         primary_result = results[0]
         to_write: Dict[str, str] = {
             "zoho_resource_id": primary_result.resource_id,
             "zoho_remote_name": primary_result.remote_name,
-            "zoho_results_json": json.dumps(
-                [
-                    {
-                        "source_path": result.source_path,
-                        "resource_id": result.resource_id,
-                        "remote_name": result.remote_name,
-                        "direct_url": result.links.get("direct"),
-                        "preview_url": result.links.get("preview"),
-                        "html": result.html_snippet,
-                    }
-                    for result in results
-                ]
+            "zoho_results_json": compact_results_json(
+                results,
+                args.results_json_output_limit,
             ),
         }
+        if args.results_json_file:
+            to_write["zoho_results_file"] = os.path.abspath(args.results_json_file)
         direct_primary = primary_result.links.get("direct")
         preview_primary = primary_result.links.get("preview")
         if direct_primary:
