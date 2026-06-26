@@ -251,10 +251,9 @@ class UploadActionTests(unittest.TestCase):
         self.assertEqual(post_mock.call_count, 2)
         sleeper.assert_called_once_with(4)
 
-    def test_share_retries_on_transient_unauthorized_r008(self):
+    def test_share_skips_transient_unauthorized_r008(self):
         responses = [
             FakeResponse(401, {"errors": [{"id": "R008", "title": "Unauthorized access"}]}),
-            FakeResponse(200, {}, ""),
         ]
 
         def fake_post(*args, **kwargs):
@@ -264,7 +263,7 @@ class UploadActionTests(unittest.TestCase):
             self.upload.requests, "post", side_effect=fake_post
         ) as post_mock:
             with mock.patch.object(self.upload.time, "sleep", return_value=None) as sleeper:
-                self.upload.share_everyone_view(
+                applied = self.upload.share_everyone_view(
                     api_base="https://api",
                     token="token",
                     resource_id="res",
@@ -273,10 +272,11 @@ class UploadActionTests(unittest.TestCase):
                     enable_logs=False,
                 )
 
-        self.assertEqual(post_mock.call_count, 2)
-        sleeper.assert_called_once_with(4)
+        self.assertFalse(applied)
+        self.assertEqual(post_mock.call_count, 1)
+        sleeper.assert_not_called()
 
-    def test_share_continues_after_repeated_transient_unauthorized_r008(self):
+    def test_share_does_not_backoff_transient_unauthorized_r008(self):
         responses = [
             FakeResponse(401, {"errors": [{"id": "R008", "title": "Unauthorized access"}]}),
             FakeResponse(401, {"errors": [{"id": "R008", "title": "Unauthorized access"}]}),
@@ -299,8 +299,9 @@ class UploadActionTests(unittest.TestCase):
                 )
 
         self.assertFalse(applied)
-        self.assertEqual(post_mock.call_count, 2)
-        sleeper.assert_called_once_with(4)
+        self.assertEqual(post_mock.call_count, 1)
+        self.assertEqual(len(responses), 1)
+        sleeper.assert_not_called()
 
     def test_share_does_not_retry_other_unauthorized_errors(self):
         response = FakeResponse(

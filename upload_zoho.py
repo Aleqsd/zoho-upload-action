@@ -424,19 +424,19 @@ def share_everyone_view(
         except requests.HTTPError as http_err:
             response = http_err.response
             status = response.status_code
-            if _is_retryable_api_response(response) and attempt < max_retries:
-                delay = _retry_delay_seconds(retry_delay, attempt, response)
-                log_line(f"🔁 Share API error {status}; retrying in {delay:.0f}s…", YELLOW, enable_logs)
-                time.sleep(delay)
-                continue
             if _is_transient_unauthorized_response(response):
                 log_line(
-                    "⚠️  Public permissions were not applied after retries; "
+                    "⚠️  Public permissions were not applied (Zoho R008); "
                     "continuing with external link creation.",
                     YELLOW,
                     enable_logs,
                 )
                 return False
+            if _is_retryable_api_status(status) and attempt < max_retries:
+                delay = _retry_delay_seconds(retry_delay, attempt, response)
+                log_line(f"🔁 Share API error {status}; retrying in {delay:.0f}s…", YELLOW, enable_logs)
+                time.sleep(delay)
+                continue
             sys.exit(color(f"❌ Share everyone failed: {status} {response.text}", RED, True))
         except requests.RequestException as exc:
             if attempt == max_retries:
