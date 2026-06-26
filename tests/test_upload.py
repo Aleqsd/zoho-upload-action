@@ -251,9 +251,86 @@ class UploadActionTests(unittest.TestCase):
         self.assertEqual(post_mock.call_count, 2)
         sleeper.assert_called_once_with(4)
 
+    def test_share_retries_on_transient_unauthorized_r008(self):
+        responses = [
+            FakeResponse(401, {"errors": [{"id": "R008", "title": "Unauthorized access"}]}),
+            FakeResponse(200, {}, ""),
+        ]
+
+        def fake_post(*args, **kwargs):
+            return responses.pop(0)
+
+        with mock.patch.object(
+            self.upload.requests, "post", side_effect=fake_post
+        ) as post_mock:
+            with mock.patch.object(self.upload.time, "sleep", return_value=None) as sleeper:
+                self.upload.share_everyone_view(
+                    api_base="https://api",
+                    token="token",
+                    resource_id="res",
+                    max_retries=3,
+                    retry_delay=4,
+                    enable_logs=False,
+                )
+
+        self.assertEqual(post_mock.call_count, 2)
+        sleeper.assert_called_once_with(4)
+
+    def test_share_does_not_retry_other_unauthorized_errors(self):
+        response = FakeResponse(
+            401,
+            {"errors": [{"id": "OAUTH_SCOPE_MISMATCH", "title": "Unauthorized access"}]},
+        )
+
+        with mock.patch.object(self.upload.requests, "post", return_value=response) as post_mock:
+            with mock.patch.object(self.upload.time, "sleep", return_value=None) as sleeper:
+                with self.assertRaises(SystemExit) as ctx:
+                    self.upload.share_everyone_view(
+                        api_base="https://api",
+                        token="token",
+                        resource_id="res",
+                        max_retries=3,
+                        retry_delay=4,
+                        enable_logs=False,
+                    )
+
+        self.assertIn("Share everyone failed: 401", str(ctx.exception))
+        self.assertEqual(post_mock.call_count, 1)
+        sleeper.assert_not_called()
+
     def test_create_external_link_retries_on_rate_limit(self):
         responses = [
             FakeResponse(429, None, "rate limited"),
+            FakeResponse(
+                200,
+                {"data": {"attributes": {"download_url": "https://files.example/download"}}},
+                "",
+            ),
+        ]
+
+        def fake_post(*args, **kwargs):
+            return responses.pop(0)
+
+        with mock.patch.object(
+            self.upload.requests, "post", side_effect=fake_post
+        ) as post_mock:
+            with mock.patch.object(self.upload.time, "sleep", return_value=None) as sleeper:
+                link = self.upload.create_external_link(
+                    api_base="https://api",
+                    token="token",
+                    resource_id="res",
+                    max_retries=3,
+                    retry_delay=5,
+                    enable_logs=False,
+                )
+
+        self.assertEqual(link, "https://files.example/download")
+        self.assertEqual(post_mock.call_count, 2)
+        sleeper.assert_called_once_with(5)
+
+    def test_create_external_link_retries_on_transient_unauthorized_r008(self):
+        responses = [
+            FakeResponse(401, {"errors": [{"id": "R008", "title": "Unauthorized access"}]}),
             FakeResponse(
                 200,
                 {"data": {"attributes": {"download_url": "https://files.example/download"}}},

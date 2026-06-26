@@ -152,6 +152,28 @@ def _is_retryable_api_status(status: int) -> bool:
     return status == 429 or status >= 500
 
 
+def _response_error_ids(response: requests.Response) -> List[str]:
+    try:
+        payload = response.json()
+    except ValueError:
+        return []
+
+    errors = payload.get("errors") if isinstance(payload, dict) else None
+    if not isinstance(errors, list):
+        return []
+    return [
+        str(error.get("id", ""))
+        for error in errors
+        if isinstance(error, dict) and error.get("id")
+    ]
+
+
+def _is_retryable_api_response(response: requests.Response) -> bool:
+    if _is_retryable_api_status(response.status_code):
+        return True
+    return response.status_code == 401 and "R008" in _response_error_ids(response)
+
+
 def _retry_delay_seconds(
     retry_delay: float,
     attempt: int,
@@ -336,7 +358,7 @@ def upload_file(
                         log_line(f"♻️  Conflict detected; retrying with '{new_name}'.", MAGENTA, enable_logs)
                         current_name = new_name
                         break
-                elif _is_retryable_api_status(status) and attempt < max_retries:
+                elif _is_retryable_api_response(response) and attempt < max_retries:
                     delay = _retry_delay_seconds(retry_delay, attempt, response)
                     log_line(
                         f"🔁 Zoho responded with {status}; retrying in {delay:.0f}s…",
@@ -389,13 +411,14 @@ def share_everyone_view(api_base: str, token: str, resource_id: str, max_retries
             log_line("🌍 Public permissions applied.", GREEN, enable_logs)
             return
         except requests.HTTPError as http_err:
-            status = http_err.response.status_code
-            if _is_retryable_api_status(status) and attempt < max_retries:
-                delay = _retry_delay_seconds(retry_delay, attempt, http_err.response)
+            response = http_err.response
+            status = response.status_code
+            if _is_retryable_api_response(response) and attempt < max_retries:
+                delay = _retry_delay_seconds(retry_delay, attempt, response)
                 log_line(f"🔁 Share API error {status}; retrying in {delay:.0f}s…", YELLOW, enable_logs)
                 time.sleep(delay)
                 continue
-            sys.exit(color(f"❌ Share everyone failed: {status} {http_err.response.text}", RED, True))
+            sys.exit(color(f"❌ Share everyone failed: {status} {response.text}", RED, True))
         except requests.RequestException as exc:
             if attempt == max_retries:
                 sys.exit(color(f"❌ Share everyone failed: {exc}", RED, True))
@@ -432,13 +455,14 @@ def create_external_link(api_base: str, token: str, resource_id: str, max_retrie
             log_line(f"🔗 External download link created: {download_url}", GREEN, enable_logs)
             return download_url
         except requests.HTTPError as http_err:
-            status = http_err.response.status_code
-            if _is_retryable_api_status(status) and attempt < max_retries:
-                delay = _retry_delay_seconds(retry_delay, attempt, http_err.response)
+            response = http_err.response
+            status = response.status_code
+            if _is_retryable_api_response(response) and attempt < max_retries:
+                delay = _retry_delay_seconds(retry_delay, attempt, response)
                 log_line(f"🔁 Link API error {status}; retrying in {delay:.0f}s…", YELLOW, enable_logs)
                 time.sleep(delay)
                 continue
-            sys.exit(color(f"❌ Create link failed: {status} {http_err.response.text}", RED, True))
+            sys.exit(color(f"❌ Create link failed: {status} {response.text}", RED, True))
         except requests.RequestException as exc:
             if attempt == max_retries:
                 sys.exit(color(f"❌ Create link failed: {exc}", RED, True))
