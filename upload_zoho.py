@@ -447,7 +447,7 @@ def share_everyone_view(
     return False
 
 
-def create_external_link(api_base: str, token: str, resource_id: str, max_retries: int, retry_delay: float, enable_logs: bool) -> str:
+def create_external_link(api_base: str, token: str, resource_id: str, max_retries: int, retry_delay: float, enable_logs: bool) -> Optional[str]:
     url = f"{api_base}/links"
     payload = {
         "data": {
@@ -477,7 +477,15 @@ def create_external_link(api_base: str, token: str, resource_id: str, max_retrie
         except requests.HTTPError as http_err:
             response = http_err.response
             status = response.status_code
-            if _is_retryable_api_response(response) and attempt < max_retries:
+            if _is_transient_unauthorized_response(response):
+                log_line(
+                    "⚠️  External link was not created (Zoho R008); "
+                    "using the WorkDrive permalink instead.",
+                    YELLOW,
+                    enable_logs,
+                )
+                return None
+            if _is_retryable_api_status(status) and attempt < max_retries:
                 delay = _retry_delay_seconds(retry_delay, attempt, response)
                 log_line(f"🔁 Link API error {status}; retrying in {delay:.0f}s…", YELLOW, enable_logs)
                 time.sleep(delay)
@@ -762,8 +770,20 @@ def main() -> None:
             base_link = create_external_link(
                 api_base, token, resource_id, args.max_retries, args.retry_delay, log_enabled
             )
-            links = compose_links(base_link, args.link_mode)
-            html_snippet = build_html_snippet(links.get("direct"))
+            if base_link:
+                links = compose_links(base_link, args.link_mode)
+                html_snippet = build_html_snippet(links.get("direct"))
+            else:
+                internal_link = permalink or f"https://workdrive.zoho.com/file/{resource_id}"
+                if args.link_mode in ("direct", "both"):
+                    links["direct"] = internal_link
+                    log_line(
+                        "⚠️  Direct downloads require external links; emitting the WorkDrive permalink instead.",
+                        YELLOW,
+                        log_enabled,
+                    )
+                if args.link_mode in ("preview", "both") or args.link_mode == "direct":
+                    links["preview"] = internal_link
         else:
             if index == 1:
                 log_line("🔒 Skipping public share; using internal WorkDrive URL.", BLUE, log_enabled)

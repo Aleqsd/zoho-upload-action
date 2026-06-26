@@ -355,14 +355,9 @@ class UploadActionTests(unittest.TestCase):
         self.assertEqual(post_mock.call_count, 2)
         sleeper.assert_called_once_with(5)
 
-    def test_create_external_link_retries_on_transient_unauthorized_r008(self):
+    def test_create_external_link_skips_transient_unauthorized_r008(self):
         responses = [
             FakeResponse(401, {"errors": [{"id": "R008", "title": "Unauthorized access"}]}),
-            FakeResponse(
-                200,
-                {"data": {"attributes": {"download_url": "https://files.example/download"}}},
-                "",
-            ),
         ]
 
         def fake_post(*args, **kwargs):
@@ -381,9 +376,9 @@ class UploadActionTests(unittest.TestCase):
                     enable_logs=False,
                 )
 
-        self.assertEqual(link, "https://files.example/download")
-        self.assertEqual(post_mock.call_count, 2)
-        sleeper.assert_called_once_with(5)
+        self.assertIsNone(link)
+        self.assertEqual(post_mock.call_count, 1)
+        sleeper.assert_not_called()
 
     def test_get_access_token_retries_on_rate_limit(self):
         responses = [
@@ -444,6 +439,36 @@ class UploadActionTests(unittest.TestCase):
         self.assertIsNone(payload.get("direct_url"))
         self.assertEqual(payload.get("preview_url"), internal_link)
         self.assertEqual(payload.get("resource_id"), "resABC")
+
+    def test_main_public_link_r008_uses_internal_link(self):
+        internal_link = "https://workdrive.zoho.com/file/internal123"
+        with mock.patch.object(
+            self.upload, "get_access_token", return_value="token"
+        ), mock.patch.object(
+            self.upload, "upload_file", return_value=("resABC", internal_link, "doc.txt")
+        ), mock.patch.object(
+            self.upload, "share_everyone_view", return_value=False
+        ) as share_mock, mock.patch.object(
+            self.upload, "create_external_link", return_value=None
+        ) as link_mock, mock.patch.object(
+            self.upload, "log_line", return_value=None
+        ):
+            argv = [
+                "upload_zoho.py",
+                str(self.sample_file),
+                "--stdout-mode=json",
+            ]
+            with mock.patch.object(sys, "argv", argv):
+                buffer = io.StringIO()
+                with mock.patch("sys.stdout", buffer):
+                    self.upload.main()
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(payload.get("direct_url"), internal_link)
+        self.assertEqual(payload.get("preview_url"), internal_link)
+        self.assertEqual(payload.get("resource_id"), "resABC")
+        share_mock.assert_called_once()
+        link_mock.assert_called_once()
 
     def test_resolve_file_path_returns_absolute(self):
         resolved = self.upload.resolve_file_path(str(self.sample_file))
