@@ -174,6 +174,10 @@ def _is_retryable_api_response(response: requests.Response) -> bool:
     return response.status_code == 401 and "R008" in _response_error_ids(response)
 
 
+def _is_transient_unauthorized_response(response: requests.Response) -> bool:
+    return response.status_code == 401 and "R008" in _response_error_ids(response)
+
+
 def _retry_delay_seconds(
     retry_delay: float,
     attempt: int,
@@ -387,7 +391,14 @@ def upload_file(
         continue
 
 
-def share_everyone_view(api_base: str, token: str, resource_id: str, max_retries: int, retry_delay: float, enable_logs: bool) -> None:
+def share_everyone_view(
+    api_base: str,
+    token: str,
+    resource_id: str,
+    max_retries: int,
+    retry_delay: float,
+    enable_logs: bool,
+) -> bool:
     url = f"{api_base}/permissions"
     payload = {
         "data": {
@@ -409,7 +420,7 @@ def share_everyone_view(api_base: str, token: str, resource_id: str, max_retries
             response = requests.post(url, headers=headers, json=payload, timeout=20)
             response.raise_for_status()
             log_line("🌍 Public permissions applied.", GREEN, enable_logs)
-            return
+            return True
         except requests.HTTPError as http_err:
             response = http_err.response
             status = response.status_code
@@ -418,6 +429,14 @@ def share_everyone_view(api_base: str, token: str, resource_id: str, max_retries
                 log_line(f"🔁 Share API error {status}; retrying in {delay:.0f}s…", YELLOW, enable_logs)
                 time.sleep(delay)
                 continue
+            if _is_transient_unauthorized_response(response):
+                log_line(
+                    "⚠️  Public permissions were not applied after retries; "
+                    "continuing with external link creation.",
+                    YELLOW,
+                    enable_logs,
+                )
+                return False
             sys.exit(color(f"❌ Share everyone failed: {status} {response.text}", RED, True))
         except requests.RequestException as exc:
             if attempt == max_retries:
@@ -425,6 +444,7 @@ def share_everyone_view(api_base: str, token: str, resource_id: str, max_retries
             delay = _retry_delay_seconds(retry_delay, attempt)
             log_line(f"🔁 Share request error ({exc}); retrying in {delay:.0f}s…", YELLOW, enable_logs)
             time.sleep(delay)
+    return False
 
 
 def create_external_link(api_base: str, token: str, resource_id: str, max_retries: int, retry_delay: float, enable_logs: bool) -> str:

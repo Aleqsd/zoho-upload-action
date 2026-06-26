@@ -276,6 +276,32 @@ class UploadActionTests(unittest.TestCase):
         self.assertEqual(post_mock.call_count, 2)
         sleeper.assert_called_once_with(4)
 
+    def test_share_continues_after_repeated_transient_unauthorized_r008(self):
+        responses = [
+            FakeResponse(401, {"errors": [{"id": "R008", "title": "Unauthorized access"}]}),
+            FakeResponse(401, {"errors": [{"id": "R008", "title": "Unauthorized access"}]}),
+        ]
+
+        def fake_post(*args, **kwargs):
+            return responses.pop(0)
+
+        with mock.patch.object(
+            self.upload.requests, "post", side_effect=fake_post
+        ) as post_mock:
+            with mock.patch.object(self.upload.time, "sleep", return_value=None) as sleeper:
+                applied = self.upload.share_everyone_view(
+                    api_base="https://api",
+                    token="token",
+                    resource_id="res",
+                    max_retries=2,
+                    retry_delay=4,
+                    enable_logs=False,
+                )
+
+        self.assertFalse(applied)
+        self.assertEqual(post_mock.call_count, 2)
+        sleeper.assert_called_once_with(4)
+
     def test_share_does_not_retry_other_unauthorized_errors(self):
         response = FakeResponse(
             401,
